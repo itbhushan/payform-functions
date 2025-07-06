@@ -1,0 +1,13 @@
+{
+  "name": "payform-netlify-functions",
+  "version": "1.0.0",
+  "description": "Payment verification functions for PayForm",
+  "main": "netlify/functions/verify-payment.js",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "scripts": {
+    "dev": "netlify dev",
+    "build": "echo 'No build step required'"
+  }
+}
