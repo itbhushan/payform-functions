@@ -78,11 +78,20 @@ exports.handler = async (event, context) => {
 
     const session = await stripeResponse.json();
     console.log('Stripe session status:', session.payment_status);
+    console.log('Stripe session metadata:', session.metadata);
 
     if (session.payment_status === 'paid') {
       console.log('Payment confirmed, logging transaction...');
 
-      // Prepare transaction data
+      // Extract product details from line items or metadata
+      const productName = session.metadata?.product_name || 
+                          (session.line_items?.data?.[0]?.description) || 
+                          'Unknown Product';
+      
+      const productPrice = session.metadata?.product_price || 
+                          (session.amount_total / 100);
+
+      // Prepare transaction data with product details
       const transactionData = {
         form_id: form_id,
         email: email,
@@ -91,8 +100,12 @@ exports.handler = async (event, context) => {
         payment_amount: session.amount_total / 100,
         payment_currency: session.currency,
         transaction_id: session.payment_intent,
+        product_name: productName, // Add product name
+        product_price: parseFloat(productPrice), // Add product price
         created_at: new Date().toISOString()
       };
+
+      console.log('Transaction data to log:', transactionData);
 
       // Log transaction to Supabase
       const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -104,7 +117,7 @@ exports.handler = async (event, context) => {
         return {
           statusCode: 200,
           headers,
-          body: generateSuccessPage(session, email, true) // true = logging issue
+          body: generateSuccessPage(session, email, productName, true) // true = logging issue
         };
       }
 
@@ -112,7 +125,7 @@ exports.handler = async (event, context) => {
       return {
         statusCode: 200,
         headers,
-        body: generateSuccessPage(session, email, false) // false = no logging issue
+        body: generateSuccessPage(session, email, productName, false) // false = no logging issue
       };
 
     } else {
@@ -135,7 +148,7 @@ exports.handler = async (event, context) => {
 };
 
 // Helper functions to generate HTML pages
-function generateSuccessPage(session, email, hasLoggingIssue) {
+function generateSuccessPage(session, email, productName, hasLoggingIssue) {
   return `
     <!DOCTYPE html>
     <html>
@@ -186,6 +199,7 @@ function generateSuccessPage(session, email, hasLoggingIssue) {
           <p>Thank you for your payment. Your transaction has been processed successfully.</p>
           
           <div class="amount">
+            <p style="margin: 5px 0;"><strong>Product:</strong> ${productName}</p>
             <p style="margin: 5px 0;"><strong>Payment ID:</strong> ${session.payment_intent}</p>
             <p style="margin: 5px 0;"><strong>Amount:</strong> ${session.currency.toUpperCase()} ${session.amount_total / 100}</p>
             <p style="margin: 5px 0;"><strong>Email:</strong> ${email}</p>
@@ -261,4 +275,3 @@ function generateIncompletePaymentPage(status) {
     </html>
   `;
 }
-
