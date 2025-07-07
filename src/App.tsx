@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import './App.css';
+import { StripeConfig } from './components/setup/StripeConfig';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'setup' | 'dashboard'>('setup');
@@ -54,8 +55,20 @@ const App: React.FC = () => {
   );
 };
 
-// Temporary Setup Wizard Component
+// Enhanced Setup Wizard Component
 const SetupWizard: React.FC = () => {
+  const [activeStep, setActiveStep] = useState<'stripe' | 'razorpay' | 'discounts' | 'templates'>('stripe');
+
+  const steps = [
+    { id: 'stripe', label: 'Stripe Configuration', icon: '💳', component: StripeConfig },
+    { id: 'razorpay', label: 'Razorpay Configuration', icon: '🏦', component: RazorpayPlaceholder },
+    { id: 'discounts', label: 'Discount Coupons', icon: '🎫', component: DiscountPlaceholder },
+    { id: 'templates', label: 'Message Templates', icon: '📧', component: TemplatePlaceholder }
+  ];
+
+  const activeStepData = steps.find(s => s.id === activeStep);
+  const ActiveComponent = activeStepData?.component || StripeConfig;
+
   return (
     <div className="space-y-6">
       <div className="bg-white shadow rounded-lg">
@@ -68,52 +81,34 @@ const SetupWizard: React.FC = () => {
 
         <div className="p-6">
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            {/* Left Side - Configuration Area */}
+            {/* Left Side - Configuration Component */}
             <div className="lg:col-span-3">
-              <div className="bg-gray-50 rounded-lg p-8 text-center">
-                <div className="text-gray-400 text-6xl mb-4">🛠️</div>
-                <h3 className="text-lg font-medium text-gray-900 mb-2">
-                  Setup Wizard
-                </h3>
-                <p className="text-gray-600">
-                  This will allow you to configure Stripe, Razorpay, discount coupons, 
-                  and custom message templates for your payment forms.
-                </p>
+              <div className="bg-white border border-gray-200 rounded-lg p-6">
+                <ActiveComponent />
               </div>
             </div>
 
-            {/* Right Side - Configuration Options */}
+            {/* Right Side - Configuration Navigation */}
             <div className="space-y-4">
               <h3 className="text-lg font-semibold text-gray-900">Configuration</h3>
               
               <div className="space-y-2">
-                <button className="w-full text-left px-4 py-3 rounded-lg border bg-blue-50 border-blue-200 text-blue-700">
-                  <div className="flex items-center space-x-3">
-                    <span className="text-lg">💳</span>
-                    <span className="font-medium">Stripe Configuration</span>
-                  </div>
-                </button>
-                
-                <button className="w-full text-left px-4 py-3 rounded-lg border bg-white border-gray-200 text-gray-700 hover:bg-gray-50">
-                  <div className="flex items-center space-x-3">
-                    <span className="text-lg">🏦</span>
-                    <span className="font-medium">Razorpay Configuration</span>
-                  </div>
-                </button>
-                
-                <button className="w-full text-left px-4 py-3 rounded-lg border bg-white border-gray-200 text-gray-700 hover:bg-gray-50">
-                  <div className="flex items-center space-x-3">
-                    <span className="text-lg">🎫</span>
-                    <span className="font-medium">Discount Coupons</span>
-                  </div>
-                </button>
-                
-                <button className="w-full text-left px-4 py-3 rounded-lg border bg-white border-gray-200 text-gray-700 hover:bg-gray-50">
-                  <div className="flex items-center space-x-3">
-                    <span className="text-lg">📧</span>
-                    <span className="font-medium">Message Templates</span>
-                  </div>
-                </button>
+                {steps.map((step) => (
+                  <button
+                    key={step.id}
+                    onClick={() => setActiveStep(step.id as any)}
+                    className={`w-full text-left px-4 py-3 rounded-lg border transition-colors ${
+                      activeStep === step.id
+                        ? 'bg-blue-50 border-blue-200 text-blue-700'
+                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <span className="text-lg">{step.icon}</span>
+                      <span className="font-medium">{step.label}</span>
+                    </div>
+                  </button>
+                ))}
               </div>
             </div>
           </div>
@@ -123,7 +118,32 @@ const SetupWizard: React.FC = () => {
   );
 };
 
-// Temporary Transaction Dashboard Component
+// Placeholder components for other configurations
+const RazorpayPlaceholder: React.FC = () => (
+  <div className="text-center py-8">
+    <div className="text-4xl mb-4">🏦</div>
+    <h3 className="text-lg font-medium text-gray-900 mb-2">Razorpay Configuration</h3>
+    <p className="text-gray-600">Coming soon! This will configure Razorpay for UPI payments.</p>
+  </div>
+);
+
+const DiscountPlaceholder: React.FC = () => (
+  <div className="text-center py-8">
+    <div className="text-4xl mb-4">🎫</div>
+    <h3 className="text-lg font-medium text-gray-900 mb-2">Discount Coupons</h3>
+    <p className="text-gray-600">Coming soon! This will manage discount codes and promotions.</p>
+  </div>
+);
+
+const TemplatePlaceholder: React.FC = () => (
+  <div className="text-center py-8">
+    <div className="text-4xl mb-4">📧</div>
+    <h3 className="text-lg font-medium text-gray-900 mb-2">Message Templates</h3>
+    <p className="text-gray-600">Coming soon! This will customize email templates and success messages.</p>
+  </div>
+);
+
+// Transaction Dashboard Component (unchanged)
 const TransactionDashboard: React.FC = () => {
   return (
     <div className="space-y-6">
