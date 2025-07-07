@@ -13,6 +13,18 @@
 [functions]
   node_bundler = "esbuild"
 
+# SPA redirect rule (MOST IMPORTANT - this was missing)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# API routes for functions
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
 # Headers for CORS and security
 [[headers]]
   for = "/*"
@@ -28,22 +40,3 @@
     Access-Control-Allow-Origin = "*"
     Access-Control-Allow-Headers = "Content-Type, Authorization"
     Access-Control-Allow-Methods = "GET, POST, OPTIONS"
-
-# Redirects for SPA routing
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-  conditions = {Role = ["admin"]}
-
-# Redirect admin paths to the dashboard
-[[redirects]]
-  from = "/admin/*"
-  to = "/index.html"
-  status = 200
-
-# Keep API routes for functions
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
