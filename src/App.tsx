@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import './App.css';
+import { CashfreeConfig } from './components/setup/CashfreeConfig';
 import { StripeConfig } from './components/setup/StripeConfig';
 
 const App: React.FC = () => {
@@ -14,6 +14,9 @@ const App: React.FC = () => {
             <div className="flex items-center">
               <h1 className="text-2xl font-bold text-gray-900">PayForm</h1>
               <span className="ml-2 text-sm text-gray-500">Admin Dashboard</span>
+            </div>
+            <div className="flex items-center space-x-4">
+              <span className="text-sm text-green-600 font-medium">🇮🇳 India-First Payments</span>
             </div>
           </div>
         </div>
@@ -57,17 +60,17 @@ const App: React.FC = () => {
 
 // Enhanced Setup Wizard Component
 const SetupWizard: React.FC = () => {
-  const [activeStep, setActiveStep] = useState<'stripe' | 'razorpay' | 'discounts' | 'templates'>('stripe');
+  const [activeStep, setActiveStep] = useState<'cashfree' | 'stripe' | 'discounts' | 'templates'>('cashfree');
 
   const steps = [
-    { id: 'stripe', label: 'Stripe Configuration', icon: '💳', component: StripeConfig },
-    { id: 'razorpay', label: 'Razorpay Configuration', icon: '🏦', component: RazorpayPlaceholder },
-    { id: 'discounts', label: 'Discount Coupons', icon: '🎫', component: DiscountPlaceholder },
-    { id: 'templates', label: 'Message Templates', icon: '📧', component: TemplatePlaceholder }
+    { id: 'cashfree', label: 'Cashfree Configuration', icon: '💳', component: CashfreeConfig, primary: true },
+    { id: 'stripe', label: 'Stripe Configuration', icon: '🌐', component: StripeConfig, primary: false },
+    { id: 'discounts', label: 'Discount Coupons', icon: '🎫', component: DiscountPlaceholder, primary: false },
+    { id: 'templates', label: 'Message Templates', icon: '📧', component: TemplatePlaceholder, primary: false }
   ];
 
   const activeStepData = steps.find(s => s.id === activeStep);
-  const ActiveComponent = activeStepData?.component || StripeConfig;
+  const ActiveComponent = activeStepData?.component || CashfreeConfig;
 
   return (
     <div className="space-y-6">
@@ -75,7 +78,7 @@ const SetupWizard: React.FC = () => {
         <div className="px-6 py-4 border-b border-gray-200">
           <h2 className="text-lg font-medium text-gray-900">Setup Wizard</h2>
           <p className="mt-1 text-sm text-gray-600">
-            Configure your PayForm settings. Set up payment providers, discount coupons, and message templates.
+            Configure your PayForm settings. Start with Cashfree for Indian payments, then add other providers as needed.
           </p>
         </div>
 
@@ -97,7 +100,7 @@ const SetupWizard: React.FC = () => {
                   <button
                     key={step.id}
                     onClick={() => setActiveStep(step.id as any)}
-                    className={`w-full text-left px-4 py-3 rounded-lg border transition-colors ${
+                    className={`w-full text-left px-4 py-3 rounded-lg border transition-colors relative ${
                       activeStep === step.id
                         ? 'bg-blue-50 border-blue-200 text-blue-700'
                         : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
@@ -105,10 +108,26 @@ const SetupWizard: React.FC = () => {
                   >
                     <div className="flex items-center space-x-3">
                       <span className="text-lg">{step.icon}</span>
-                      <span className="font-medium">{step.label}</span>
+                      <div className="flex-1">
+                        <span className="font-medium">{step.label}</span>
+                        {step.primary && (
+                          <span className="block text-xs text-blue-600">Recommended for India</span>
+                        )}
+                      </div>
+                      {step.primary && (
+                        <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full"></span>
+                      )}
                     </div>
                   </button>
                 ))}
+              </div>
+
+              {/* Provider Priority Info */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-600">
+                <p className="font-medium mb-1">🇮🇳 India-First Approach:</p>
+                <p>• <strong>Cashfree</strong>: Primary (UPI, Cards, Net Banking)</p>
+                <p>• <strong>Stripe</strong>: International expansion</p>
+                <p>• <strong>Others</strong>: Coming soon</p>
               </div>
             </div>
           </div>
@@ -119,19 +138,14 @@ const SetupWizard: React.FC = () => {
 };
 
 // Placeholder components for other configurations
-const RazorpayPlaceholder: React.FC = () => (
-  <div className="text-center py-8">
-    <div className="text-4xl mb-4">🏦</div>
-    <h3 className="text-lg font-medium text-gray-900 mb-2">Razorpay Configuration</h3>
-    <p className="text-gray-600">Coming soon! This will configure Razorpay for UPI payments.</p>
-  </div>
-);
-
 const DiscountPlaceholder: React.FC = () => (
   <div className="text-center py-8">
     <div className="text-4xl mb-4">🎫</div>
     <h3 className="text-lg font-medium text-gray-900 mb-2">Discount Coupons</h3>
     <p className="text-gray-600">Coming soon! This will manage discount codes and promotions.</p>
+    <div className="mt-4 p-3 bg-blue-50 rounded-lg text-sm text-blue-700">
+      Focus on Cashfree setup first, then we'll add advanced features like coupons.
+    </div>
   </div>
 );
 
@@ -140,6 +154,9 @@ const TemplatePlaceholder: React.FC = () => (
     <div className="text-4xl mb-4">📧</div>
     <h3 className="text-lg font-medium text-gray-900 mb-2">Message Templates</h3>
     <p className="text-gray-600">Coming soon! This will customize email templates and success messages.</p>
+    <div className="mt-4 p-3 bg-blue-50 rounded-lg text-sm text-blue-700">
+      Focus on payment processing first, then we'll enhance the user experience.
+    </div>
   </div>
 );
 
@@ -212,7 +229,13 @@ const TransactionDashboard: React.FC = () => {
                   Email
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Product
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Amount
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Commission
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Status
@@ -225,49 +248,128 @@ const TransactionDashboard: React.FC = () => {
             <tbody className="bg-white divide-y divide-gray-200">
               <tr>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
-                  txn_1234567...
+                  CF_12345...
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                   customer@example.com
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  ₹299.00
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                    Paid
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  2025-07-06
-                </td>
-              </tr>
-              
-              <tr>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
-                  txn_9876543...
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  user@test.com
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  ₹999.00
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
-                    Pending
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  2025-07-06
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
+                 E-Book
+               </td>
+               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                 ₹299.00
+               </td>
+               <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600 font-medium">
+                 ₹9.00
+               </td>
+               <td className="px-6 py-4 whitespace-nowrap">
+                 <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                   Paid
+                 </span>
+               </td>
+               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                 2025-07-06
+               </td>
+             </tr>
+             
+             <tr>
+               <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
+                 CF_67890...
+               </td>
+               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                 user@test.com
+               </td>
+               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                 Online Course
+               </td>
+               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                 ₹999.00
+               </td>
+               <td className="px-6 py-4 whitespace-nowrap text-sm text-yellow-600 font-medium">
+                 ₹30.00
+               </td>
+               <td className="px-6 py-4 whitespace-nowrap">
+                 <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                   Pending
+                 </span>
+               </td>
+               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                 2025-07-06
+               </td>
+             </tr>
+             
+             <tr>
+               <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
+                 CF_11111...
+               </td>
+               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                 workshop@user.com
+               </td>
+               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                 Consultation
+               </td>
+               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                 ₹1,999.00
+               </td>
+               <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600 font-medium">
+                 ₹60.00
+               </td>
+               <td className="px-6 py-4 whitespace-nowrap">
+                 <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                   Paid
+                 </span>
+               </td>
+               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                 2025-07-05
+               </td>
+             </tr>
+           </tbody>
+         </table>
+       </div>
+       
+       {/* Enhanced Footer with Commission Summary */}
+       <div className="px-6 py-4 bg-gray-50 border-t">
+         <div className="flex justify-between items-center text-sm">
+           <div className="text-gray-600">
+             Showing 3 of 12 transactions
+           </div>
+           <div className="flex items-center space-x-6">
+             <div className="text-gray-700">
+               <span className="font-medium">Total Revenue:</span> ₹3,297.00
+             </div>
+             <div className="text-green-600 font-medium">
+               <span>Your Commission:</span> ₹99.00
+             </div>
+           </div>
+         </div>
+       </div>
+     </div>
+
+     {/* Commission Insights */}
+     <div className="bg-white shadow rounded-lg">
+       <div className="px-6 py-4 border-b border-gray-200">
+         <h3 className="text-lg font-medium text-gray-900">Platform Performance</h3>
+       </div>
+       <div className="p-6">
+         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+           <div className="text-center">
+             <div className="text-2xl font-bold text-blue-600">3.0%</div>
+             <div className="text-sm text-gray-600">Average Commission Rate</div>
+           </div>
+           <div className="text-center">
+             <div className="text-2xl font-bold text-green-600">₹33.00</div>
+             <div className="text-sm text-gray-600">Average Commission per Transaction</div>
+           </div>
+           <div className="text-center">
+             <div className="text-2xl font-bold text-purple-600">₹1,188</div>
+             <div className="text-sm text-gray-600">Projected Monthly Revenue</div>
+           </div>
+         </div>
+       </div>
+     </div>
+   </div>
+ );
 };
 
 export default App;
+                  
