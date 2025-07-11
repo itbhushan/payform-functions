@@ -1,7 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 
 exports.handler = async (event, context) => {
-  // Enable CORS
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',
@@ -9,133 +8,79 @@ exports.handler = async (event, context) => {
     'Content-Type': 'text/html; charset=utf-8'
   };
 
-  // Handle CORS preflight
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers, body: '' };
   }
 
   try {
-    console.log('Payment verification started');
-    console.log('Query parameters:', event.queryStringParameters);
+    const { order_id, form_id, email } = event.queryStringParameters || {};
 
-    // Get parameters from URL
-    const { session_id, form_id, email, status } = event.queryStringParameters || {};
-
-    // Validate required parameters
-    if (!session_id || !form_id || !email) {
-      console.log('Missing required parameters');
+    if (!order_id || !form_id || !email) {
       return {
         statusCode: 400,
         headers,
-        body: generateErrorPage('Missing required parameters for payment verification.')
+        body: generateErrorPage('Missing required parameters')
       };
     }
 
-    // Check if payment was cancelled
-    if (status === 'cancelled') {
-      console.log('Payment was cancelled');
-      return {
-        statusCode: 200,
-        headers,
-        body: generateCancelledPage()
-      };
-    }
-
-    // Environment variables (set these in Netlify)
-    const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+    // Environment variables
+    const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
+    const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
     const SUPABASE_URL = process.env.SUPABASE_URL;
     const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    if (!STRIPE_SECRET_KEY || !SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-      console.log('Missing environment variables');
-      return {
-        statusCode: 500,
-        headers,
-        body: generateErrorPage('Server configuration error. Please contact support.')
-      };
-    }
-
-    console.log('Verifying payment with Stripe...');
-
-    // Verify payment with Stripe
-    const stripeResponse = await fetch(`https://api.stripe.com/v1/checkout/sessions/${session_id}`, {
+    // Verify payment with Cashfree
+    const paymentResponse = await fetch(`https://sandbox.cashfree.com/pg/orders/${order_id}`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${STRIPE_SECRET_KEY}`,
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'x-client-id': CASHFREE_APP_ID,
+        'x-client-secret': CASHFREE_SECRET_KEY,
+        'x-api-version': '2023-08-01'
       }
     });
 
-    if (!stripeResponse.ok) {
-      const errorText = await stripeResponse.text();
-      console.error('Stripe API error:', stripeResponse.status, errorText);
-      return {
-        statusCode: 500,
-        headers,
-        body: generateErrorPage('Unable to verify payment with Stripe. Please contact support.')
-      };
-    }
+    const paymentData = await paymentResponse.json();
 
-    const session = await stripeResponse.json();
-    console.log('Stripe session status:', session.payment_status);
-
-    if (session.payment_status === 'paid') {
-      console.log('Payment confirmed, logging transaction...');
-
-      // Prepare transaction data
-      const transactionData = {
-        form_id: form_id,
-        email: email,
-        payment_provider: 'stripe',
-        payment_status: session.payment_status,
-        payment_amount: session.amount_total / 100,
-        payment_currency: session.currency,
-        transaction_id: session.payment_intent,
-        created_at: new Date().toISOString()
-      };
-
-      // Log transaction to Supabase
+    if (paymentData.order_status === 'PAID') {
+      // Update transaction in database
       const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-      const { error } = await supabase.from('transactions').insert([transactionData]);
+      
+      const { error } = await supabase
+        .from('transactions')
+        .update({
+          payment_status: 'paid',
+          updated_at: new Date().toISOString()
+        })
+        .eq('transaction_id', order_id);
 
       if (error) {
-        console.error('Database insert error:', error);
-        // Still show success but mention logging issue
-        return {
-          statusCode: 200,
-          headers,
-          body: generateSuccessPage(session, email, true) // true = logging issue
-        };
+        console.error('Database update error:', error);
       }
 
-      console.log('Transaction logged successfully');
       return {
         statusCode: 200,
         headers,
-        body: generateSuccessPage(session, email, false) // false = no logging issue
+        body: generateSuccessPage(paymentData, email)
       };
-
     } else {
-      console.log('Payment not completed:', session.payment_status);
       return {
         statusCode: 400,
         headers,
-        body: generateIncompletePaymentPage(session.payment_status)
+        body: generatePendingPage(paymentData.order_status)
       };
     }
 
   } catch (error) {
-    console.error('Function error:', error);
+    console.error('Verification error:', error);
     return {
       statusCode: 500,
       headers,
-      body: generateErrorPage(`Internal error: ${error.message}`)
+      body: generateErrorPage(error.message)
     };
   }
 };
 
-// Helper functions to generate HTML pages
-function generateSuccessPage(session, email, hasLoggingIssue) {
+function generateSuccessPage(paymentData, email) {
   return `
     <!DOCTYPE html>
     <html>
@@ -169,33 +114,23 @@ function generateSuccessPage(session, email, hasLoggingIssue) {
             margin: 20px 0; 
             border-left: 4px solid #4caf50; 
           }
-          .warning { 
-            background: #fff3cd; 
-            padding: 15px; 
-            border-radius: 8px; 
-            margin: 15px 0; 
-            border-left: 4px solid #ffc107; 
-            color: #856404; 
-          }
         </style>
       </head>
       <body>
         <div class="container">
           <div class="success-icon">🎉</div>
           <h1 style="color: #4caf50; margin-bottom: 10px;">Payment Successful!</h1>
-          <p>Thank you for your payment. Your transaction has been processed successfully.</p>
+          <p>Thank you for your payment via Cashfree.</p>
           
           <div class="amount">
-            <p style="margin: 5px 0;"><strong>Payment ID:</strong> ${session.payment_intent}</p>
-            <p style="margin: 5px 0;"><strong>Amount:</strong> ${session.currency.toUpperCase()} ${session.amount_total / 100}</p>
-            <p style="margin: 5px 0;"><strong>Email:</strong> ${email}</p>
-            <p style="margin: 5px 0;"><strong>Status:</strong> ✅ Paid${hasLoggingIssue ? ' (logging issue)' : ' & Logged'}</p>
+            <p><strong>Order ID:</strong> ${paymentData.order_id}</p>
+            <p><strong>Amount:</strong> ₹${paymentData.order_amount}</p>
+            <p><strong>Email:</strong> ${email}</p>
+            <p><strong>Status:</strong> ✅ PAID</p>
           </div>
 
-          ${hasLoggingIssue ? '<div class="warning"><strong>Note:</strong> Payment was successful but there was a minor issue logging the transaction. Please save the payment ID above.</div>' : ''}
-
           <p>You will receive a confirmation email shortly.</p>
-          <p style="color: #666; margin-top: 30px; font-size: 14px;">You can now close this window.</p>
+          <p style="color: #666; margin-top: 30px; font-size: 14px;">Powered by PayForm & Cashfree</p>
         </div>
       </body>
     </html>
@@ -222,40 +157,20 @@ function generateErrorPage(message) {
   `;
 }
 
-function generateCancelledPage() {
+function generatePendingPage(status) {
   return `
     <!DOCTYPE html>
     <html>
       <head>
-        <title>Payment Cancelled - PayForm</title>
+        <title>Payment Pending - PayForm</title>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
       </head>
       <body style="font-family: Arial, sans-serif; padding: 40px; text-align: center; background: #f8f9fa;">
         <div style="background: white; padding: 30px; border-radius: 10px; max-width: 500px; margin: 0 auto; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-          <h2 style="color: #ffc107;">⚠️ Payment Cancelled</h2>
-          <p>Your payment was cancelled. No charges were made.</p>
-          <p>You can try again or contact support if you need assistance.</p>
-        </div>
-      </body>
-    </html>
-  `;
-}
-
-function generateIncompletePaymentPage(status) {
-  return `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>Payment Incomplete - PayForm</title>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-      </head>
-      <body style="font-family: Arial, sans-serif; padding: 40px; text-align: center; background: #f8f9fa;">
-        <div style="background: white; padding: 30px; border-radius: 10px; max-width: 500px; margin: 0 auto; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-          <h2 style="color: #ffc107;">⏳ Payment Incomplete</h2>
-          <p>Your payment status: <strong>${status}</strong></p>
-          <p>Please try again or contact support if you believe this is an error.</p>
+          <h2 style="color: #ffc107;">⏳ Payment Pending</h2>
+          <p>Payment status: <strong>${status}</strong></p>
+          <p>Please wait or try again.</p>
         </div>
       </body>
     </html>
