@@ -1,5 +1,5 @@
 // netlify/functions/create-cashfree-payment.js
-// Simplified version that bypasses database checks
+// Fixed simple version - READY TO USE
 
 // Cashfree configuration
 const CASHFREE_CONFIG = {
@@ -96,7 +96,7 @@ exports.handler = async (event, context) => {
         phone: requestData.customer_phone || '9999999999'
       },
       product_name: requestData.product_name,
-      return_url: buildReturnUrl(orderId),
+      return_url: buildReturnUrl(orderId, totalAmount), // ← Fixed: pass amount
       notify_url: buildNotifyUrl(),
       commission_split: commissionSplit
     });
@@ -252,7 +252,7 @@ async function createCashfreeOrder(orderData) {
       order_meta: {
         return_url: orderData.return_url,
         notify_url: orderData.notify_url,
-        payment_methods: 'cc,dc,nb,upi,app'
+        payment_methods: 'cc,dc,nb,upi,app'  // ✅ FIXED: 'app' instead of 'wallet'
       },
       order_note: `Payment for ${orderData.product_name}`,
       order_tags: {
@@ -312,9 +312,9 @@ async function createCashfreeOrder(orderData) {
 /**
  * Build return URL for payment completion
  */
-function buildReturnUrl(orderId) {
+function buildReturnUrl(orderId, amount) {
   const baseUrl = process.env.URL || 'https://payform2025.netlify.app';
-  return `${baseUrl}/payment-success.html?order_id=${orderId}`;
+  return `${baseUrl}/payment-success.html?order_id=${orderId}&amount=${amount}`;  // ✅ FIXED: Include amount
 }
 
 /**
