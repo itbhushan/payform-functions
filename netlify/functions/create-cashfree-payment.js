@@ -1,5 +1,7 @@
 // netlify/functions/create-cashfree-payment.js
-// Fixed simple version - READY TO USE
+// Enhanced version with database integration
+
+const { createClient } = require('@supabase/supabase-js');
 
 // Cashfree configuration
 const CASHFREE_CONFIG = {
@@ -10,6 +12,12 @@ const CASHFREE_CONFIG = {
   secret_key: process.env.CASHFREE_SECRET_KEY,
   api_version: '2023-08-01'
 };
+
+// Supabase configuration
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 // Commission rates configuration
 const COMMISSION_CONFIG = {
@@ -45,7 +53,7 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    console.log('🚀 Creating Cashfree payment session...');
+    console.log('🚀 Creating Cashfree payment session with database integration...');
     console.log('Request body:', event.body);
 
     // Parse and validate request data
@@ -75,6 +83,13 @@ exports.handler = async (event, context) => {
       };
     }
 
+    // Verify admin configuration in database
+    const adminVerification = await verifyAdminConfig(requestData.form_admin_id);
+    if (!adminVerification.success) {
+      console.warn('⚠️ Admin verification failed, but continuing with payment:', adminVerification.error);
+      // Continue anyway - don't block payments due to DB issues
+    }
+
     // Generate unique order ID
     const orderId = generateOrderId();
     const totalAmount = parseFloat(requestData.product_price);
@@ -86,7 +101,7 @@ exports.handler = async (event, context) => {
     const commissionSplit = calculateCommissionSplit(totalAmount);
     console.log('Commission split:', commissionSplit);
 
-    // Create Cashfree order (bypass database check)
+    // Create Cashfree order
     const cashfreeResult = await createCashfreeOrder({
       order_id: orderId,
       order_amount: totalAmount,
@@ -96,7 +111,7 @@ exports.handler = async (event, context) => {
         phone: requestData.customer_phone || '9999999999'
       },
       product_name: requestData.product_name,
-      return_url: buildReturnUrl(orderId, totalAmount), // ← Fixed: pass amount
+      return_url: buildReturnUrl(orderId, totalAmount),
       notify_url: buildNotifyUrl(),
       commission_split: commissionSplit
     });
@@ -110,6 +125,32 @@ exports.handler = async (event, context) => {
           error: cashfreeResult.error
         })
       };
+    }
+
+    // Log transaction to database
+    const dbResult = await logTransactionToDatabase({
+      form_id: requestData.form_id,
+      customer_email: requestData.customer_email,
+      customer_name: requestData.customer_name || 'Customer',
+      product_name: requestData.product_name,
+      total_amount: totalAmount,
+      order_id: orderId,
+      cashfree_order_id: cashfreeResult.data.cf_order_id,
+      form_admin_id: requestData.form_admin_id,
+      commission_split: commissionSplit,
+      metadata: {
+        source: 'google_forms',
+        timestamp: new Date().toISOString(),
+        user_agent: event.headers['user-agent'],
+        request_data: requestData
+      }
+    });
+
+    if (!dbResult.success) {
+      console.error('⚠️ Database logging failed:', dbResult.error);
+      // Continue anyway - payment should not fail due to DB logging issues
+    } else {
+      console.log('✅ Transaction logged to database:', dbResult.data.id);
     }
 
     // Build payment URL
@@ -129,7 +170,9 @@ exports.handler = async (event, context) => {
         cf_order_id: cashfreeResult.data.cf_order_id,
         amount: totalAmount,
         commission_split: commissionSplit,
-        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24 hours
+        database_logged: dbResult.success,
+        transaction_id: dbResult.success ? dbResult.data.id : null,
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
       })
     };
 
@@ -206,6 +249,114 @@ function validateRequestData(data) {
 }
 
 /**
+ * Verify admin configuration (soft check - doesn't block payment)
+ */
+async function verifyAdminConfig(adminId) {
+  try {
+    console.log('🔍 Verifying admin config for:', adminId);
+
+    // Check if admin exists
+    const { data: adminData, error: adminError } = await supabase
+      .from('form_admins')
+      .select('*')
+      .eq('id', adminId)
+      .single();
+
+    if (adminError || !adminData) {
+      console.log('ℹ️ Admin not found in database, but payment can proceed');
+      return {
+        success: false,
+        error: 'Admin not found in database'
+      };
+    }
+
+    // Check provider config
+    const { data: configData, error: configError } = await supabase
+      .from('provider_configs')
+      .select('*')
+      .eq('admin_id', adminId)
+      .eq('provider_name', 'cashfree');
+
+    if (configError || !configData || configData.length === 0) {
+      console.log('ℹ️ Provider config not found, but payment can proceed');
+      return {
+        success: false,
+        error: 'Provider config not found'
+      };
+    }
+
+    console.log('✅ Admin verification successful');
+    return {
+      success: true,
+      data: {
+        admin: adminData,
+        config: configData[0]
+      }
+    };
+
+  } catch (error) {
+    console.error('Error verifying admin config:', error);
+    return {
+      success: false,
+      error: 'Database error during verification'
+    };
+  }
+}
+
+/**
+ * Log transaction to database
+ */
+async function logTransactionToDatabase(transactionData) {
+  try {
+    console.log('💾 Logging transaction to database...');
+
+    const { data, error } = await supabase
+      .from('transactions')
+      .insert([{
+        form_id: transactionData.form_id,
+        email: transactionData.customer_email,
+        customer_name: transactionData.customer_name,
+        product_name: transactionData.product_name,
+        payment_amount: transactionData.total_amount,
+        payment_currency: 'INR',
+        payment_status: 'pending',
+        payment_provider: 'cashfree',
+        transaction_id: transactionData.order_id,
+        cashfree_order_id: transactionData.cashfree_order_id,
+        admin_id: transactionData.form_admin_id,
+        gateway_fee: transactionData.commission_split.gatewayFee,
+        platform_commission: transactionData.commission_split.platformCommission,
+        net_amount_to_admin: transactionData.commission_split.formAdminAmount,
+        metadata: transactionData.metadata,
+        created_at: new Date().toISOString()
+      }])
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Database insert error:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+
+    console.log('✅ Transaction logged successfully:', data.id);
+    return {
+      success: true,
+      data: data
+    };
+
+  } catch (error) {
+    console.error('Error logging transaction:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+/**
  * Generate unique order ID
  */
 function generateOrderId() {
@@ -233,7 +384,7 @@ function calculateCommissionSplit(totalAmount) {
 }
 
 /**
- * Create Cashfree order with commission splitting
+ * Create Cashfree order
  */
 async function createCashfreeOrder(orderData) {
   try {
@@ -252,7 +403,7 @@ async function createCashfreeOrder(orderData) {
       order_meta: {
         return_url: orderData.return_url,
         notify_url: orderData.notify_url,
-        payment_methods: 'cc,dc,nb,upi,app'  // ✅ FIXED: 'app' instead of 'wallet'
+        payment_methods: 'cc,dc,nb,upi,app'
       },
       order_note: `Payment for ${orderData.product_name}`,
       order_tags: {
@@ -314,7 +465,7 @@ async function createCashfreeOrder(orderData) {
  */
 function buildReturnUrl(orderId, amount) {
   const baseUrl = process.env.URL || 'https://payform2025.netlify.app';
-  return `${baseUrl}/payment-success.html?order_id=${orderId}&amount=${amount}`;  // ✅ FIXED: Include amount
+  return `${baseUrl}/payment-success.html?order_id=${orderId}&amount=${amount}`;
 }
 
 /**
