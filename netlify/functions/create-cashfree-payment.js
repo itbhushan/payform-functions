@@ -386,7 +386,7 @@ function calculateCommissionSplit(totalAmount) {
 /**
  * Create Cashfree order
  */
-async function createCashfreeOrder(orderData) {
+------- /*async function createCashfreeOrder(orderData) {
   try {
     console.log('💳 Creating Cashfree order...');
 
@@ -458,8 +458,124 @@ async function createCashfreeOrder(orderData) {
       error: `Network error: ${error.message}`
     };
   }
-}
+}*/ -------
 
+// Debug version of createCashfreeOrder function
+// Replace just this function in your existing code
+
+async function createCashfreeOrder(orderData) {
+  try {
+    console.log('💳 Creating Cashfree order...');
+    console.log('Order data received:', JSON.stringify(orderData, null, 2));
+
+    const cashfreePayload = {
+      order_id: orderData.order_id,
+      order_amount: orderData.order_amount,
+      order_currency: 'INR',
+      customer_details: {
+        customer_id: orderData.customer_details.email.replace(/[@.]/g, '_'),
+        customer_name: orderData.customer_details.name,
+        customer_email: orderData.customer_details.email,
+        customer_phone: orderData.customer_details.phone
+      },
+      order_meta: {
+        return_url: orderData.return_url,
+        notify_url: orderData.notify_url,
+        payment_methods: 'cc,dc,nb,upi,app'
+      },
+      order_note: `Payment for ${orderData.product_name}`,
+      order_tags: {
+        source: 'payform',
+        product: orderData.product_name,
+        form_admin_id: 'f807a8c3-316b-4df0-90e7-5f7796c86f71'
+      }
+    };
+
+    console.log('🔍 CASHFREE CONFIG CHECK:');
+    console.log('Base URL:', CASHFREE_CONFIG.base_url);
+    console.log('App ID exists:', !!CASHFREE_CONFIG.app_id);
+    console.log('Secret Key exists:', !!CASHFREE_CONFIG.secret_key);
+    console.log('API Version:', CASHFREE_CONFIG.api_version);
+
+    console.log('📤 Sending payload to Cashfree:', JSON.stringify(cashfreePayload, null, 2));
+
+    const response = await fetch(`${CASHFREE_CONFIG.base_url}/pg/orders`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-version': CASHFREE_CONFIG.api_version,
+        'x-client-id': CASHFREE_CONFIG.app_id,
+        'x-client-secret': CASHFREE_CONFIG.secret_key
+      },
+      body: JSON.stringify(cashfreePayload)
+    });
+
+    const responseText = await response.text();
+    
+    console.log('📥 CASHFREE API RESPONSE:');
+    console.log('Status:', response.status);
+    console.log('Status Text:', response.statusText);
+    console.log('Headers:', JSON.stringify([...response.headers.entries()]));
+    console.log('Body:', responseText);
+
+    if (!response.ok) {
+      console.error('❌ Cashfree API Error Details:');
+      console.error('Status:', response.status);
+      console.error('Response:', responseText);
+      
+      return {
+        success: false,
+        error: `Cashfree API error (${response.status}): ${responseText}`
+      };
+    }
+
+    let responseData;
+    try {
+      responseData = JSON.parse(responseText);
+      console.log('✅ Parsed response data:', JSON.stringify(responseData, null, 2));
+    } catch (parseError) {
+      console.error('❌ Error parsing Cashfree response:', parseError);
+      return {
+        success: false,
+        error: 'Invalid JSON response from Cashfree API'
+      };
+    }
+
+    if (responseData.cf_order_id && responseData.payment_session_id) {
+      const finalPaymentUrl = `${CASHFREE_CONFIG.base_url}/checkout/pay/${responseData.payment_session_id}`;
+      
+      console.log('🎯 FINAL PAYMENT URL CONSTRUCTED:');
+      console.log('Payment Session ID:', responseData.payment_session_id);
+      console.log('Final URL:', finalPaymentUrl);
+      console.log('CF Order ID:', responseData.cf_order_id);
+      
+      return {
+        success: true,
+        data: responseData
+      };
+    } else {
+      console.error('❌ Missing required fields in Cashfree response:');
+      console.error('cf_order_id:', responseData.cf_order_id);
+      console.error('payment_session_id:', responseData.payment_session_id);
+      
+      return {
+        success: false,
+        error: 'Invalid response from Cashfree API - missing session ID'
+      };
+    }
+
+  } catch (error) {
+    console.error('❌ Network/Other Error:', error);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    
+    return {
+      success: false,
+      error: `Network error: ${error.message}`
+    };
+  }
+}
+  
 /**
  * Build return URL for payment completion
  */
