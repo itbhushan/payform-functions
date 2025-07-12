@@ -252,7 +252,7 @@ async function createCashfreeOrder(orderData) {
       order_meta: {
         return_url: orderData.return_url,
         notify_url: orderData.notify_url,
-        payment_methods: 'cc,dc,nb,upi,wallet'
+        payment_methods: 'cc,dc,nb,upi,app'
       },
       order_note: `Payment for ${orderData.product_name}`,
       order_tags: {
