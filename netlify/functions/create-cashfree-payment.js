@@ -1,8 +1,8 @@
-// Fixed netlify/functions/create-cashfree-payment.js with correct URL format
+// Updated netlify/functions/create-cashfree-payment.js using Payment Links API
 const { createClient } = require('@supabase/supabase-js');
 
 exports.handler = async (event, context) => {
-  console.log('🚀 Function started');
+  console.log('🚀 Function started - Using Cashfree Payment Links API');
 
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -73,9 +73,9 @@ exports.handler = async (event, context) => {
       };
     }
 
-    // Generate unique order ID
-    const orderId = `payform_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    console.log('🆔 Generated order ID:', orderId);
+    // Generate unique link ID
+    const linkId = `payform_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    console.log('🆔 Generated link ID:', linkId);
 
     // Commission calculation
     const totalAmount = parseFloat(product_price);
@@ -89,36 +89,50 @@ exports.handler = async (event, context) => {
     console.log('- Platform commission:', platformCommission.toFixed(2));
     console.log('- Form admin amount:', formAdminAmount.toFixed(2));
 
-    // Cashfree API endpoint
+    // Cashfree Payment Links API endpoint
     const cashfreeBaseUrl = CASHFREE_ENVIRONMENT === 'production' 
       ? 'https://api.cashfree.com/pg' 
       : 'https://sandbox.cashfree.com/pg';
     
-    const cashfreeUrl = `${cashfreeBaseUrl}/orders`;
-    console.log('🌐 Cashfree API URL:', cashfreeUrl);
+    const cashfreeUrl = `${cashfreeBaseUrl}/links`;
+    console.log('🌐 Cashfree Payment Links URL:', cashfreeUrl);
 
-    // Prepare Cashfree payment request
+    // Prepare Cashfree Payment Link request
     const cashfreePayload = {
-      order_id: orderId,
-      order_amount: totalAmount,
-      order_currency: 'INR',
+      link_id: linkId,
+      link_amount: totalAmount,
+      link_currency: 'INR',
+      link_purpose: product_name,
       customer_details: {
-        customer_id: email.replace('@', '_at_').replace(/\./g, '_dot_'),
         customer_name: customer_name,
         customer_email: email,
         customer_phone: '9999999999'
       },
-      order_meta: {
-        return_url: `${SITE_URL}/payment-success.html?order_id=${orderId}&email=${encodeURIComponent(email)}&product=${encodeURIComponent(product_name)}&amount=${totalAmount}`,
-        notify_url: `${SITE_URL}/.netlify/functions/verify-cashfree-payment`
+      link_partial_payments: false,
+      link_minimum_partial_amount: totalAmount,
+      link_expiry_time: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours from now
+      link_notes: {
+        form_id: form_id,
+        form_admin_id: form_admin_id || 'default',
+        product_name: product_name,
+        source: 'payform'
       },
-      order_note: `Payment for ${product_name}`
+      link_auto_reminders: false,
+      link_notify: {
+        send_sms: false,
+        send_email: false
+      },
+      link_meta: {
+        return_url: `${SITE_URL}/payment-success.html?link_id=${linkId}&email=${encodeURIComponent(email)}&product=${encodeURIComponent(product_name)}&amount=${totalAmount}`,
+        notify_url: `${SITE_URL}/.netlify/functions/verify-cashfree-payment`,
+        upi_intent: true
+      }
     };
 
-    console.log('📤 Cashfree payload:', JSON.stringify(cashfreePayload, null, 2));
+    console.log('📤 Cashfree Payment Link payload:', JSON.stringify(cashfreePayload, null, 2));
 
-    // Call Cashfree API
-    console.log('📡 Making request to Cashfree...');
+    // Call Cashfree Payment Links API
+    console.log('📡 Making request to Cashfree Payment Links API...');
     const cashfreeResponse = await fetch(cashfreeUrl, {
       method: 'POST',
       headers: {
@@ -164,39 +178,24 @@ exports.handler = async (event, context) => {
       };
     }
 
-    // FIXED: Correct Cashfree URL format based on official documentation
-    let paymentUrl = null;
+    // Extract payment URL from Payment Link response
+    const paymentUrl = cashfreeResult.link_url;
     
-    console.log('🔍 Available fields in Cashfree response:', Object.keys(cashfreeResult));
-    
-    if (cashfreeResult.payment_session_id) {
-      // CORRECT format for Cashfree Checkout - use payment_session_id directly
-      paymentUrl = `https://payments${CASHFREE_ENVIRONMENT === 'production' ? '' : '-test'}.cashfree.com/order/#${cashfreeResult.payment_session_id}`;
-      console.log('🔗 Using Cashfree Checkout URL format:', paymentUrl);
-    } else if (cashfreeResult.cf_order_id) {
-      // Alternative: Use cf_order_id
-      paymentUrl = `https://payments${CASHFREE_ENVIRONMENT === 'production' ? '' : '-test'}.cashfree.com/order/${cashfreeResult.cf_order_id}`;
-      console.log('🔗 Using cf_order_id URL format:', paymentUrl);
-    }
-    
+    console.log('🔗 Payment Link URL:', paymentUrl);
+
     if (!paymentUrl) {
-      console.log('❌ No payment URL could be constructed');
+      console.log('❌ No payment URL in response');
       return {
         statusCode: 500,
         headers,
         body: JSON.stringify({ 
           error: 'No payment URL generated',
-          debug_info: {
-            cashfree_response: cashfreeResult,
-            available_fields: Object.keys(cashfreeResult)
-          }
+          cashfree_response: cashfreeResult
         })
       };
     }
 
-    console.log('✅ Final payment URL:', paymentUrl);
-
-    // Save transaction to database - FIXED: Remove non-existent column
+    // Save transaction to database
     if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
       try {
         console.log('💾 Saving to database...');
@@ -211,9 +210,8 @@ exports.handler = async (event, context) => {
           payment_currency: 'INR',
           payment_status: 'pending',
           payment_provider: 'cashfree',
-          transaction_id: orderId,
-          cashfree_order_id: cashfreeResult.cf_order_id || orderId,
-          // REMOVED: cashfree_payment_session_id (column doesn't exist)
+          transaction_id: linkId,
+          cashfree_order_id: cashfreeResult.cf_link_id || linkId,
           gateway_fee: gatewayFee,
           platform_commission: platformCommission,
           net_amount_to_admin: formAdminAmount,
@@ -235,9 +233,8 @@ exports.handler = async (event, context) => {
     const response = {
       success: true,
       payment_url: paymentUrl,
-      order_id: orderId,
-      cf_order_id: cashfreeResult.cf_order_id,
-      payment_session_id: cashfreeResult.payment_session_id,
+      link_id: linkId,
+      cf_link_id: cashfreeResult.cf_link_id,
       amount: totalAmount,
       currency: 'INR',
       customer_email: email,
@@ -247,7 +244,8 @@ exports.handler = async (event, context) => {
         gateway_fee: gatewayFee.toFixed(2),
         platform_commission: platformCommission.toFixed(2),
         form_admin_amount: formAdminAmount.toFixed(2)
-      }
+      },
+      expires_at: cashfreeResult.link_expiry_time
     };
 
     console.log('✅ Success response:', JSON.stringify(response, null, 2));
