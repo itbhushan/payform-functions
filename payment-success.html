@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Successful - PayForm</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            max-width: 600px;
+            width: 100%;
+            text-align: center;
+            animation: slideIn 0.5s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .success-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+            animation: bounce 0.6s ease-out 0.2s both;
+        }
+        
+        @keyframes bounce {
+            0%, 20%, 53%, 80%, 100% {
+                transform: translate3d(0,0,0);
+            }
+            40%, 43% {
+                transform: translate3d(0, -10px, 0);
+            }
+            70% {
+                transform: translate3d(0, -5px, 0);
+            }
+            90% {
+                transform: translate3d(0, -2px, 0);
+            }
+        }
+        
+        h1 {
+            color: #4caf50;
+            margin-bottom: 10px;
+            font-size: 2rem;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 1.1rem;
+        }
+        
+        .payment-details {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 10px;
+            margin: 25px 0;
+            border-left: 4px solid #4caf50;
+            text-align: left;
+        }
+        
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 8px 0;
+            padding: 5px 0;
+        }
+        
+        .detail-label {
+            color: #666;
+            font-weight: 500;
+        }
+        
+        .detail-value {
+            color: #333;
+            font-weight: 600;
+        }
+        
+        .commission-breakdown {
+            background: #e8f5e8;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            text-align: left;
+        }
+        
+        .commission-title {
+            font-weight: 600;
+            color: #2e7d2e;
+            margin-bottom: 10px;
+            font-size: 0.95rem;
+        }
+        
+        .commission-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 5px 0;
+            font-size: 0.9rem;
+        }
+        
+        .next-steps {
+            background: #e3f2fd;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 25px 0;
+            border-left: 4px solid #2196f3;
+        }
+        
+        .next-steps h3 {
+            color: #1976d2;
+            margin-bottom: 10px;
+        }
+        
+        .next-steps ul {
+            text-align: left;
+            color: #1565c0;
+        }
+        
+        .next-steps li {
+            margin: 5px 0;
+        }
+        
+        .footer-note {
+            color: #999;
+            margin-top: 30px;
+            font-size: 0.9rem;
+        }
+        
+        .loading {
+            color: #666;
+            font-style: italic;
+        }
+        
+        @media (max-width: 600px) {
+            .container {
+                padding: 30px 20px;
+            }
+            
+            h1 {
+                font-size: 1.5rem;
+            }
+            
+            .success-icon {
+                font-size: 48px;
+            }
+            
+            .detail-row {
+                flex-direction: column;
+                gap: 5px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="success-icon">🎉</div>
+        <h1>Payment Successful!</h1>
+        <p class="subtitle">Thank you for your purchase. Your payment has been processed successfully.</p>
+        
+        <div class="payment-details" id="paymentDetails">
+            <div class="detail-row">
+                <span class="detail-label">Order ID:</span>
+                <span class="detail-value" id="orderId">Loading...</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Product:</span>
+                <span class="detail-value" id="productName">Loading...</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Amount Paid:</span>
+                <span class="detail-value" id="amount">Loading...</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Email:</span>
+                <span class="detail-value" id="email">Loading...</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Payment Method:</span>
+                <span class="detail-value">Cashfree (Cards/UPI/Net Banking)</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Status:</span>
+                <span class="detail-value" style="color: #4caf50;">✅ Completed</span>
+            </div>
+        </div>
+        
+        <div class="commission-breakdown">
+            <div class="commission-title">💰 Transaction Breakdown</div>
+            <div class="commission-row">
+                <span>Total Amount:</span>
+                <span id="totalAmount">₹0</span>
+            </div>
+            <div class="commission-row">
+                <span>Gateway Fee (2.5% + ₹3):</span>
+                <span id="gatewayFee">₹0</span>
+            </div>
+            <div class="commission-row">
+                <span>Platform Commission (3%):</span>
+                <span id="platformFee">₹0</span>
+            </div>
+            <div class="commission-row" style="border-top: 1px solid #c8e6c9; padding-top: 8px; margin-top: 8px; font-weight: 600;">
+                <span>Form Admin Receives:</span>
+                <span id="adminAmount" style="color: #2e7d2e;">₹0</span>
+            </div>
+        </div>
+        
+        <div class="next-steps">
+            <h3>📧 What happens next?</h3>
+            <ul>
+                <li>You'll receive a payment confirmation email shortly</li>
+                <li>Access to your purchased product will be provided as communicated</li>
+                <li>Keep this page bookmarked for your records</li>
+                <li>Contact support if you have any questions</li>
+            </ul>
+        </div>
+        
+        <p class="footer-note">
+            Transaction processed securely by PayForm + Cashfree<br>
+            You can safely close this window
+        </p>
+    </div>
+
+    <script>
+        // Extract URL parameters and populate page
+        function getUrlParams() {
+            const params = new URLSearchParams(window.location.search);
+            return {
+                order_id: params.get('order_id'),
+                email: params.get('email'),
+                product: params.get('product'),
+                amount: params.get('amount')
+            };
+        }
+        
+        function calculateCommissions(amount) {
+            const total = parseFloat(amount);
+            const gatewayFee = (total * 2.5 / 100) + 3;
+            const platformCommission = total * 3 / 100;
+            const adminAmount = total - gatewayFee - platformCommission;
+            
+            return {
+                total: total.toFixed(2),
+                gatewayFee: gatewayFee.toFixed(2),
+                platformCommission: platformCommission.toFixed(2),
+                adminAmount: adminAmount.toFixed(2)
+            };
+        }
+        
+        // Populate page with data
+        document.addEventListener('DOMContentLoaded', function() {
+            const params = getUrlParams();
+            
+            if (params.order_id) {
+                document.getElementById('orderId').textContent = params.order_id;
+            }
+            
+            if (params.email) {
+                document.getElementById('email').textContent = params.email;
+            }
+            
+            if (params.product) {
+                document.getElementById('productName').textContent = decodeURIComponent(params.product);
+            }
+            
+            if (params.amount) {
+                const amount = params.amount;
+                document.getElementById('amount').textContent = `₹${parseFloat(amount).toFixed(2)}`;
+                
+                // Calculate and display commission breakdown
+                const commissions = calculateCommissions(amount);
+                document.getElementById('totalAmount').textContent = `₹${commissions.total}`;
+                document.getElementById('gatewayFee').textContent = `₹${commissions.gatewayFee}`;
+                document.getElementById('platformFee').textContent = `₹${commissions.platformCommission}`;
+                document.getElementById('adminAmount').textContent = `₹${commissions.adminAmount}`;
+            }
+            
+            // If no parameters found, show default message
+            if (!params.order_id && !params.email && !params.product && !params.amount) {
+                document.getElementById('paymentDetails').innerHTML = `
+                    <div style="text-align: center; color: #666;">
+                        <p>Payment completed successfully!</p>
+                        <p>Order details will be sent to your email.</p>
+                    </div>
+                `;
+            }
+        });
+        
+        // Add some interactive effects
+        document.querySelector('.success-icon').addEventListener('click', function() {
+            this.style.animation = 'none';
+            setTimeout(() => {
+                this.style.animation = 'bounce 0.6s ease-out';
+            }, 10);
+        });
+    </script>
+</body>
+</html>
