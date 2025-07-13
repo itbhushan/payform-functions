@@ -1,4 +1,4 @@
-// netlify/functions/verify-payment.js - UPDATED FOR CASHFREE
+// netlify/functions/verify-payment.js - FIXED VERSION
 const { createClient } = require('@supabase/supabase-js');
 
 exports.handler = async (event, context) => {
@@ -16,15 +16,15 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    console.log('Cashfree payment verification started');
-    console.log('Query parameters:', event.queryStringParameters);
+    console.log('🔍 Cashfree payment verification started');
+    console.log('📥 Query parameters:', event.queryStringParameters);
 
     // Get parameters from URL (Cashfree return URL)
     const { order_id, form_id, email, status } = event.queryStringParameters || {};
 
     // Validate required parameters
     if (!order_id || !form_id || !email) {
-      console.log('Missing required parameters');
+      console.error('❌ Missing required parameters:', { order_id, form_id, email });
       return {
         statusCode: 400,
         headers,
@@ -34,7 +34,7 @@ exports.handler = async (event, context) => {
 
     // Check if payment was cancelled
     if (status === 'cancelled') {
-      console.log('Payment was cancelled');
+      console.log('⚠️ Payment was cancelled');
       return {
         statusCode: 200,
         headers,
@@ -48,8 +48,15 @@ exports.handler = async (event, context) => {
     const SUPABASE_URL = process.env.SUPABASE_URL;
     const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+    console.log('🔧 Environment check:', {
+      CASHFREE_APP_ID: !!CASHFREE_APP_ID,
+      CASHFREE_SECRET_KEY: !!CASHFREE_SECRET_KEY,
+      SUPABASE_URL: !!SUPABASE_URL,
+      SUPABASE_SERVICE_ROLE_KEY: !!SUPABASE_SERVICE_ROLE_KEY
+    });
+
     if (!CASHFREE_APP_ID || !CASHFREE_SECRET_KEY || !SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-      console.log('Missing environment variables');
+      console.error('❌ Missing environment variables');
       return {
         statusCode: 500,
         headers,
@@ -57,7 +64,7 @@ exports.handler = async (event, context) => {
       };
     }
 
-    console.log('Verifying payment with Cashfree...');
+    console.log('🔍 Verifying payment with Cashfree API...');
 
     // Verify payment with Cashfree API
     const cashfreeResponse = await fetch(`https://sandbox.cashfree.com/pg/orders/${order_id}`, {
@@ -70,9 +77,46 @@ exports.handler = async (event, context) => {
       }
     });
 
+    console.log('📡 Cashfree API response:', {
+      status: cashfreeResponse.status,
+      ok: cashfreeResponse.ok
+    });
+
     if (!cashfreeResponse.ok) {
       const errorText = await cashfreeResponse.text();
-      console.error('Cashfree API error:', cashfreeResponse.status, errorText);
+      console.error('❌ Cashfree API error:', cashfreeResponse.status, errorText);
+      
+      // If order not found, it might be a payment link, try the links endpoint
+      if (cashfreeResponse.status === 404) {
+        console.log('🔄 Trying payment links endpoint...');
+        
+        const linkResponse = await fetch(`https://sandbox.cashfree.com/pg/links/${order_id}`, {
+          method: 'GET',
+          headers: {
+            'x-client-id': CASHFREE_APP_ID,
+            'x-client-secret': CASHFREE_SECRET_KEY,
+            'x-api-version': '2023-08-01',
+            'Accept': 'application/json'
+          }
+        });
+
+        if (linkResponse.ok) {
+          const linkData = await linkResponse.json();
+          console.log('💳 Payment link data:', linkData);
+          
+          // Check if payment link has been paid
+          if (linkData.link_amount_paid >= linkData.link_amount) {
+            return await handlePaymentSuccess(linkData, email, order_id, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+          } else {
+            return {
+              statusCode: 200,
+              headers,
+              body: generatePendingPage(`Payment not completed. Amount paid: ₹${linkData.link_amount_paid} of ₹${linkData.link_amount}`)
+            };
+          }
+        }
+      }
+      
       return {
         statusCode: 500,
         headers,
@@ -81,104 +125,25 @@ exports.handler = async (event, context) => {
     }
 
     const orderData = await cashfreeResponse.json();
-    console.log('Cashfree order status:', orderData.order_status);
-    console.log('Cashfree order data:', orderData);
+    console.log('💳 Cashfree order data:', {
+      order_id: orderData.order_id,
+      order_status: orderData.order_status,
+      order_amount: orderData.order_amount
+    });
 
     if (orderData.order_status === 'PAID') {
-      console.log('Payment confirmed, updating transaction...');
-
-      // Extract product details from order or database
-      const productName = orderData.order_note || orderData.order_tags?.product_name || 'Purchase';
-      const productPrice = orderData.order_amount;
-
-      // Calculate commission breakdown
-      const totalAmount = parseFloat(productPrice);
-      const gatewayFee = (totalAmount * 2.5 / 100) + 3; // 2.5% + ₹3
-      const platformCommission = totalAmount * 3 / 100; // 3%
-      const netAmountToAdmin = totalAmount - gatewayFee - platformCommission;
-
-      // Update transaction in Supabase
-      const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-
-      // Find and update the transaction
-      const { data: transaction, error: findError } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('cashfree_order_id', order_id)
-        .single();
-
-      if (findError || !transaction) {
-        console.error('Transaction not found:', findError);
-        // Still show success but mention logging issue
-        return {
-          statusCode: 200,
-          headers,
-          body: generateSuccessPage(orderData, email, productName, true) // true = logging issue
-        };
-      }
-
-      // Update transaction status
-      const { error: updateError } = await supabase
-        .from('transactions')
-        .update({
-          payment_status: 'paid',
-          cashfree_payment_id: orderData.cf_order_id,
-          gateway_fee: gatewayFee,
-          platform_commission: platformCommission,
-          net_amount_to_admin: netAmountToAdmin,
-          payment_completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', transaction.id);
-
-      if (updateError) {
-        console.error('Database update error:', updateError);
-        // Still show success but mention logging issue
-        return {
-          statusCode: 200,
-          headers,
-          body: generateSuccessPage(orderData, email, productName, true) // true = logging issue
-        };
-      }
-
-      // Create commission record
-      const { error: commissionError } = await supabase
-        .from('platform_commissions')
-        .insert({
-          transaction_id: transaction.id,
-          form_admin_id: transaction.admin_id,
-          commission_amount: platformCommission,
-          commission_rate: 3.0,
-          platform_fee: platformCommission,
-          gateway_fee: gatewayFee,
-          net_amount_to_admin: netAmountToAdmin,
-          status: 'completed',
-          cashfree_payment_id: orderData.cf_order_id,
-          processed_at: new Date().toISOString()
-        });
-
-      if (commissionError) {
-        console.error('Commission record error:', commissionError);
-      }
-
-      console.log('Transaction updated successfully');
+      return await handlePaymentSuccess(orderData, email, order_id, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    } else {
+      console.log('⏳ Payment not completed:', orderData.order_status);
       return {
         statusCode: 200,
         headers,
-        body: generateSuccessPage(orderData, email, productName, false) // false = no logging issue
-      };
-
-    } else {
-      console.log('Payment not completed:', orderData.order_status);
-      return {
-        statusCode: 400,
-        headers,
-        body: generateIncompletePaymentPage(orderData.order_status)
+        body: generatePendingPage(orderData.order_status)
       };
     }
 
   } catch (error) {
-    console.error('Function error:', error);
+    console.error('❌ Function error:', error);
     return {
       statusCode: 500,
       headers,
@@ -187,8 +152,124 @@ exports.handler = async (event, context) => {
   }
 };
 
+// Handle successful payment
+async function handlePaymentSuccess(paymentData, email, orderId, supabaseUrl, supabaseKey) {
+  try {
+    console.log('✅ Processing successful payment...');
+
+    // Create Supabase client
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Find the transaction by order_id
+    const { data: transaction, error: findError } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('cashfree_order_id', orderId)
+      .single();
+
+    console.log('🔍 Transaction lookup:', {
+      found: !!transaction,
+      error: findError?.message,
+      orderId
+    });
+
+    if (findError || !transaction) {
+      console.error('❌ Transaction not found:', findError);
+      // Still show success but mention logging issue
+      return {
+        statusCode: 200,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Content-Type': 'text/html; charset=utf-8'
+        },
+        body: generateSuccessPage(paymentData, email, 'Purchase', true) // true = logging issue
+      };
+    }
+
+    // Calculate commission breakdown
+    const totalAmount = parseFloat(paymentData.order_amount || paymentData.link_amount);
+    const gatewayFee = (totalAmount * 2.5 / 100) + 3;
+    const platformCommission = totalAmount * 3 / 100;
+    const netAmountToAdmin = totalAmount - gatewayFee - platformCommission;
+
+    // Update transaction status
+    const { error: updateError } = await supabase
+      .from('transactions')
+      .update({
+        payment_status: 'paid',
+        cashfree_payment_id: paymentData.cf_order_id || paymentData.cf_link_id,
+        gateway_fee: gatewayFee,
+        platform_commission: platformCommission,
+        net_amount_to_admin: netAmountToAdmin,
+        payment_completed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', transaction.id);
+
+    if (updateError) {
+      console.error('❌ Database update error:', updateError);
+      // Still show success but mention logging issue
+      return {
+        statusCode: 200,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Content-Type': 'text/html; charset=utf-8'
+        },
+        body: generateSuccessPage(paymentData, email, transaction.product_name, true)
+      };
+    }
+
+    // Create commission record
+    const { error: commissionError } = await supabase
+      .from('platform_commissions')
+      .insert({
+        transaction_id: transaction.id,
+        form_admin_id: transaction.admin_id,
+        commission_amount: platformCommission,
+        commission_rate: 3.0,
+        platform_fee: platformCommission,
+        gateway_fee: gatewayFee,
+        net_amount_to_admin: netAmountToAdmin,
+        status: 'completed',
+        cashfree_payment_id: paymentData.cf_order_id || paymentData.cf_link_id,
+        processed_at: new Date().toISOString()
+      });
+
+    if (commissionError) {
+      console.error('⚠️ Commission record error:', commissionError);
+      // Continue anyway
+    } else {
+      console.log('✅ Commission record created');
+    }
+
+    console.log('✅ Transaction updated successfully');
+    return {
+      statusCode: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Content-Type': 'text/html; charset=utf-8'
+      },
+      body: generateSuccessPage(paymentData, email, transaction.product_name, false)
+    };
+
+  } catch (error) {
+    console.error('❌ Error in handlePaymentSuccess:', error);
+    return {
+      statusCode: 500,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Content-Type': 'text/html; charset=utf-8'
+      },
+      body: generateErrorPage(`Error processing payment: ${error.message}`)
+    };
+  }
+}
+
 // Helper functions to generate HTML pages
-function generateSuccessPage(orderData, email, productName, hasLoggingIssue) {
+function generateSuccessPage(paymentData, email, productName, hasLoggingIssue) {
+  const amount = paymentData.order_amount || paymentData.link_amount;
+  const paymentId = paymentData.order_id || paymentData.link_id;
+  
   return `
     <!DOCTYPE html>
     <html>
@@ -214,7 +295,7 @@ function generateSuccessPage(orderData, email, productName, hasLoggingIssue) {
             max-width: 500px; 
             text-align: center; 
           }
-          .success-icon { font-size: 64px; margin-bottom: 20px; }
+          .success-icon { font-size: 64px; margin-bottom: 20px; animation: bounce 1s infinite; }
           .amount { 
             background: #e8f5e8; 
             padding: 20px; 
@@ -238,6 +319,25 @@ function generateSuccessPage(orderData, email, productName, hasLoggingIssue) {
             text-align: left;
             font-size: 14px;
           }
+          @keyframes bounce {
+            0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+            40% { transform: translateY(-10px); }
+            60% { transform: translateY(-5px); }
+          }
+          .btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+            text-decoration: none;
+            display: inline-block;
+          }
+          .btn:hover { background: #0056b3; }
+          .btn-secondary { background: #6c757d; }
+          .btn-secondary:hover { background: #545b62; }
         </style>
       </head>
       <body>
@@ -248,8 +348,8 @@ function generateSuccessPage(orderData, email, productName, hasLoggingIssue) {
           
           <div class="amount">
             <p style="margin: 5px 0;"><strong>Product:</strong> ${productName}</p>
-            <p style="margin: 5px 0;"><strong>Order ID:</strong> ${orderData.order_id}</p>
-            <p style="margin: 5px 0;"><strong>Amount:</strong> ₹${orderData.order_amount}</p>
+            <p style="margin: 5px 0;"><strong>Payment ID:</strong> ${paymentId}</p>
+            <p style="margin: 5px 0;"><strong>Amount:</strong> ₹${amount}</p>
             <p style="margin: 5px 0;"><strong>Email:</strong> ${email}</p>
             <p style="margin: 5px 0;"><strong>Status:</strong> ✅ PAID${hasLoggingIssue ? ' (logging issue)' : ' & Logged'}</p>
           </div>
@@ -257,34 +357,34 @@ function generateSuccessPage(orderData, email, productName, hasLoggingIssue) {
           <div class="commission-breakdown">
             <h4 style="margin: 0 0 10px 0; color: #495057;">💰 Transaction Breakdown</h4>
             <div style="display: flex; justify-content: space-between; margin: 5px 0;">
-              <span>Subtotal:</span>
-              <span>₹${orderData.order_amount}</span>
+              <span>Total Amount:</span>
+              <span>₹${amount}</span>
             </div>
             <div style="display: flex; justify-content: space-between; margin: 5px 0; color: #6c757d;">
               <span>Gateway Fee (2.5% + ₹3):</span>
-              <span>₹${((parseFloat(orderData.order_amount) * 2.5 / 100) + 3).toFixed(2)}</span>
+              <span>₹${((parseFloat(amount) * 2.5 / 100) + 3).toFixed(2)}</span>
             </div>
             <div style="display: flex; justify-content: space-between; margin: 5px 0; color: #6c757d;">
               <span>Platform Fee (3%):</span>
-              <span>₹${(parseFloat(orderData.order_amount) * 3 / 100).toFixed(2)}</span>
+              <span>₹${(parseFloat(amount) * 3 / 100).toFixed(2)}</span>
             </div>
             <div style="border-top: 1px solid #dee2e6; margin: 10px 0; padding-top: 5px;">
               <div style="display: flex; justify-content: space-between; font-weight: bold;">
                 <span>Form Owner Receives:</span>
-                <span style="color: #28a745;">₹${(parseFloat(orderData.order_amount) - ((parseFloat(orderData.order_amount) * 2.5 / 100) + 3) - (parseFloat(orderData.order_amount) * 3 / 100)).toFixed(2)}</span>
+                <span style="color: #28a745;">₹${(parseFloat(amount) - ((parseFloat(amount) * 2.5 / 100) + 3) - (parseFloat(amount) * 3 / 100)).toFixed(2)}</span>
               </div>
             </div>
           </div>
 
-          ${hasLoggingIssue ? '<div class="warning"><strong>Note:</strong> Payment was successful but there was a minor issue logging the transaction. Please save the order ID above.</div>' : ''}
+          ${hasLoggingIssue ? '<div class="warning"><strong>Note:</strong> Payment was successful but there was a minor issue logging the transaction. Please save the payment ID above.</div>' : ''}
 
           <p>You will receive a confirmation email shortly.</p>
           
           <div style="margin-top: 20px;">
-            <button onclick="downloadReceipt()" style="background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin-right: 10px;">
+            <button onclick="downloadReceipt()" class="btn">
               📄 Download Receipt
             </button>
-            <button onclick="window.close()" style="background: #6c757d; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer;">
+            <button onclick="window.close()" class="btn btn-secondary">
               Close Window
             </button>
           </div>
@@ -297,32 +397,43 @@ function generateSuccessPage(orderData, email, productName, hasLoggingIssue) {
         <script>
           function downloadReceipt() {
             const receiptContent = \`
-PAYMENT RECEIPT
-===============
+PAYFORM PAYMENT RECEIPT
+======================
 
 Product: ${productName}
-Order ID: ${orderData.order_id}
-Amount: ₹${orderData.order_amount}
+Payment ID: ${paymentId}
+Amount: ₹${amount}
 Email: ${email}
 Date: \${new Date().toLocaleDateString('en-IN')}
+Time: \${new Date().toLocaleTimeString('en-IN')}
 Status: PAID
 
-Payment Gateway: Cashfree
+Gateway: Cashfree
 Platform: PayForm
 
 Thank you for your payment!
+
+---
+PayForm - Secure payments for Google Forms
             \`.trim();
             
             const blob = new Blob([receiptContent], { type: 'text/plain' });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = \`PayForm-Receipt-\${${orderData.order_id}}.txt\`;
+            a.download = \`PayForm-Receipt-\${Date.now()}.txt\`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
             window.URL.revokeObjectURL(url);
           }
+          
+          // Auto-close after 5 minutes
+          setTimeout(() => {
+            if (confirm('This window will close automatically. Click Cancel to keep it open.')) {
+              window.close();
+            }
+          }, 300000);
         </script>
       </body>
     </html>
@@ -371,20 +482,20 @@ function generateCancelledPage() {
   `;
 }
 
-function generateIncompletePaymentPage(status) {
+function generatePendingPage(status) {
   return `
     <!DOCTYPE html>
     <html>
       <head>
-        <title>Payment Incomplete - PayForm</title>
+        <title>Payment Pending - PayForm</title>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
       </head>
       <body style="font-family: Arial, sans-serif; padding: 40px; text-align: center; background: #f8f9fa;">
         <div style="background: white; padding: 30px; border-radius: 10px; max-width: 500px; margin: 0 auto; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-          <h2 style="color: #ffc107;">⏳ Payment Incomplete</h2>
-          <p>Your payment status: <strong>${status}</strong></p>
-          <p>Please try again or contact support if you believe this is an error.</p>
+          <h2 style="color: #ffc107;">⏳ Payment Pending</h2>
+          <p>Payment status: <strong>${status}</strong></p>
+          <p>Please complete your payment or try again.</p>
           <p style="color: #666; margin-top: 20px; font-size: 14px;">Powered by PayForm & Cashfree</p>
         </div>
       </body>
