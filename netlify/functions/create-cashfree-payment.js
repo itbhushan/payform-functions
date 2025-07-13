@@ -1,390 +1,271 @@
-// netlify/functions/create-cashfree-payment.js
-// Clean version without syntax errors
-
+// Enhanced netlify/functions/create-cashfree-payment.js
 const { createClient } = require('@supabase/supabase-js');
 
-// Cashfree configuration
-const CASHFREE_CONFIG = {
-  base_url: process.env.CASHFREE_ENVIRONMENT === 'production' 
-    ? 'https://api.cashfree.com' 
-    : 'https://sandbox.cashfree.com',
-  app_id: process.env.CASHFREE_APP_ID,
-  secret_key: process.env.CASHFREE_SECRET_KEY,
-  api_version: '2023-08-01'
-};
-
-// Supabase configuration
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
-
-// Commission rates configuration
-const COMMISSION_CONFIG = {
-  platform_rate: 3.0, // 3% platform commission
-  gateway_rate: 2.5,  // 2.5% Cashfree gateway fee
-  fixed_fee: 3.0      // ₹3 fixed fee
-};
-
 exports.handler = async (event, context) => {
-  // CORS headers
+  console.log('🚀 Function started');
+  console.log('📋 Event:', JSON.stringify(event, null, 2));
+
   const headers = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Content-Type': 'application/json'
   };
 
-  // Handle CORS preflight
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers, body: '' };
   }
 
-  // Only allow POST requests
   if (event.httpMethod !== 'POST') {
+    console.log('❌ Invalid method:', event.httpMethod);
     return {
       statusCode: 405,
       headers,
-      body: JSON.stringify({ 
-        success: false, 
-        error: 'Method not allowed. Use POST.' 
-      })
+      body: JSON.stringify({ error: 'Method not allowed' })
     };
   }
 
   try {
-    console.log('🚀 Creating Cashfree payment session...');
-    console.log('Request body:', event.body);
-
-    // Parse and validate request data
-    const requestData = JSON.parse(event.body);
-    const validationResult = validateRequestData(requestData);
-    
-    if (!validationResult.isValid) {
+    // Parse request body
+    let requestData;
+    try {
+      requestData = JSON.parse(event.body);
+      console.log('📥 Request data:', JSON.stringify(requestData, null, 2));
+    } catch (e) {
+      console.log('❌ Invalid JSON in request body');
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({
-          success: false,
-          error: validationResult.error
+        body: JSON.stringify({ error: 'Invalid JSON in request body' })
+      };
+    }
+
+    const { form_id, email, product_name, product_price, form_admin_id } = requestData;
+
+    // Validate required fields
+    if (!form_id || !email || !product_name || !product_price) {
+      console.log('❌ Missing required fields');
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ 
+          error: 'Missing required fields',
+          required: ['form_id', 'email', 'product_name', 'product_price']
         })
       };
     }
 
-    // Check if we have Cashfree credentials
-    if (!CASHFREE_CONFIG.app_id || !CASHFREE_CONFIG.secret_key) {
+    // Environment variables
+    const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
+    const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
+    const CASHFREE_ENVIRONMENT = process.env.CASHFREE_ENVIRONMENT || 'sandbox';
+    const SUPABASE_URL = process.env.SUPABASE_URL;
+    const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const SITE_URL = process.env.URL || 'https://payform2025.netlify.app';
+
+    console.log('🔐 Environment check:');
+    console.log('- CASHFREE_APP_ID:', CASHFREE_APP_ID ? '✅ Set' : '❌ Missing');
+    console.log('- CASHFREE_SECRET_KEY:', CASHFREE_SECRET_KEY ? '✅ Set' : '❌ Missing');
+    console.log('- CASHFREE_ENVIRONMENT:', CASHFREE_ENVIRONMENT);
+    console.log('- SUPABASE_URL:', SUPABASE_URL ? '✅ Set' : '❌ Missing');
+    console.log('- SITE_URL:', SITE_URL);
+
+    if (!CASHFREE_APP_ID || !CASHFREE_SECRET_KEY) {
+      console.log('❌ Missing Cashfree credentials');
       return {
         statusCode: 500,
         headers,
-        body: JSON.stringify({
-          success: false,
-          error: 'Cashfree credentials not configured. Please set CASHFREE_APP_ID and CASHFREE_SECRET_KEY environment variables.'
-        })
+        body: JSON.stringify({ error: 'Server configuration error - Missing Cashfree credentials' })
       };
     }
 
     // Generate unique order ID
-    const orderId = generateOrderId();
-    const totalAmount = parseFloat(requestData.product_price);
+    const orderId = `payform_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    console.log('🆔 Generated order ID:', orderId);
+
+    // Commission calculation
+    const totalAmount = parseFloat(product_price);
+    const gatewayFee = (totalAmount * 2.5 / 100) + 3;
+    const platformCommission = totalAmount * 3 / 100;
+    const formAdminAmount = totalAmount - gatewayFee - platformCommission;
+
+    console.log('💰 Commission breakdown:');
+    console.log('- Total amount:', totalAmount);
+    console.log('- Gateway fee:', gatewayFee.toFixed(2));
+    console.log('- Platform commission:', platformCommission.toFixed(2));
+    console.log('- Form admin amount:', formAdminAmount.toFixed(2));
+
+    // Cashfree API endpoint
+    const cashfreeBaseUrl = CASHFREE_ENVIRONMENT === 'production' 
+      ? 'https://api.cashfree.com/pg' 
+      : 'https://sandbox.cashfree.com/pg';
     
-    console.log('Generated order ID:', orderId);
-    console.log('Total amount:', totalAmount);
+    const cashfreeUrl = `${cashfreeBaseUrl}/orders`;
+    console.log('🌐 Cashfree API URL:', cashfreeUrl);
 
-    // Calculate commission split
-    const commissionSplit = calculateCommissionSplit(totalAmount);
-    console.log('Commission split:', commissionSplit);
-
-    // Create Cashfree order
-    const cashfreeResult = await createCashfreeOrder({
+    // Prepare Cashfree payment request
+    const cashfreePayload = {
       order_id: orderId,
       order_amount: totalAmount,
-      customer_details: {
-        email: requestData.customer_email,
-        name: requestData.customer_name || 'Customer',
-        phone: requestData.customer_phone || '9999999999'
-      },
-      product_name: requestData.product_name,
-      return_url: buildReturnUrl(orderId, totalAmount),
-      notify_url: buildNotifyUrl(),
-      commission_split: commissionSplit
-    });
-
-    if (!cashfreeResult.success) {
-      return {
-        statusCode: 500,
-        headers,
-        body: JSON.stringify({
-          success: false,
-          error: cashfreeResult.error
-        })
-      };
-    }
-
-    // Try to log transaction to database (non-blocking)
-    try {
-      const dbResult = await logTransactionToDatabase({
-        form_id: requestData.form_id,
-        customer_email: requestData.customer_email,
-        customer_name: requestData.customer_name || 'Customer',
-        product_name: requestData.product_name,
-        total_amount: totalAmount,
-        order_id: orderId,
-        cashfree_order_id: cashfreeResult.data.cf_order_id,
-        form_admin_id: requestData.form_admin_id,
-        commission_split: commissionSplit
-      });
-      
-      if (dbResult.success) {
-        console.log('✅ Transaction logged to database:', dbResult.data.id);
-      } else {
-        console.warn('⚠️ Database logging failed:', dbResult.error);
-      }
-    } catch (dbError) {
-      console.warn('⚠️ Database logging error:', dbError.message);
-    }
-
-    // Build payment URL
-    const paymentUrl = `${CASHFREE_CONFIG.base_url}/checkout/pay/${cashfreeResult.data.payment_session_id}`;
-    
-    console.log('✅ Payment session created successfully');
-    console.log('Payment URL:', paymentUrl);
-
-    // Return success response
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({
-        success: true,
-        payment_url: paymentUrl,
-        order_id: orderId,
-        cf_order_id: cashfreeResult.data.cf_order_id,
-        amount: totalAmount,
-        commission_split: commissionSplit,
-        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-      })
-    };
-
-  } catch (error) {
-    console.error('❌ Function error:', error);
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({
-        success: false,
-        error: 'Internal server error',
-        message: error.message,
-        timestamp: new Date().toISOString()
-      })
-    };
-  }
-};
-
-function validateRequestData(data) {
-  const requiredFields = [
-    'customer_email',
-    'product_name', 
-    'product_price',
-    'form_id',
-    'form_admin_id'
-  ];
-
-  for (const field of requiredFields) {
-    if (!data[field]) {
-      return {
-        isValid: false,
-        error: `Missing required field: ${field}`
-      };
-    }
-  }
-
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(data.customer_email)) {
-    return {
-      isValid: false,
-      error: 'Invalid email address format'
-    };
-  }
-
-  const price = parseFloat(data.product_price);
-  if (isNaN(price) || price <= 0) {
-    return {
-      isValid: false,
-      error: 'Invalid product price. Must be a positive number.'
-    };
-  }
-
-  if (price < 10) {
-    return {
-      isValid: false,
-      error: 'Minimum payment amount is ₹10'
-    };
-  }
-
-  if (price > 100000) {
-    return {
-      isValid: false,
-      error: 'Maximum payment amount is ₹1,00,000'
-    };
-  }
-
-  return { isValid: true };
-}
-
-function generateOrderId() {
-  const timestamp = Date.now();
-  const random = Math.random().toString(36).substr(2, 8);
-  return `PF_${timestamp}_${random}`;
-}
-
-function calculateCommissionSplit(totalAmount) {
-  const gatewayFee = (totalAmount * COMMISSION_CONFIG.gateway_rate / 100) + COMMISSION_CONFIG.fixed_fee;
-  const platformCommission = totalAmount * COMMISSION_CONFIG.platform_rate / 100;
-  const formAdminAmount = totalAmount - gatewayFee - platformCommission;
-  
-  return {
-    totalAmount: Number(totalAmount.toFixed(2)),
-    gatewayFee: Number(gatewayFee.toFixed(2)),
-    platformCommission: Number(platformCommission.toFixed(2)),
-    formAdminAmount: Number(formAdminAmount.toFixed(2)),
-    platformRate: COMMISSION_CONFIG.platform_rate,
-    gatewayRate: COMMISSION_CONFIG.gateway_rate
-  };
-}
-
-async function createCashfreeOrder(orderData) {
-  try {
-    console.log('💳 Creating Cashfree order...');
-    console.log('🔍 Cashfree Config Check:');
-    console.log('Base URL:', CASHFREE_CONFIG.base_url);
-    console.log('App ID exists:', !!CASHFREE_CONFIG.app_id);
-    console.log('Secret Key exists:', !!CASHFREE_CONFIG.secret_key);
-
-    const cashfreePayload = {
-      order_id: orderData.order_id,
-      order_amount: orderData.order_amount,
       order_currency: 'INR',
       customer_details: {
-        customer_id: orderData.customer_details.email.replace(/[@.]/g, '_'),
-        customer_name: orderData.customer_details.name,
-        customer_email: orderData.customer_details.email,
-        customer_phone: orderData.customer_details.phone
+        customer_id: email.replace('@', '_at_').replace('.', '_dot_'),
+        customer_name: email.split('@')[0],
+        customer_email: email,
+        customer_phone: '9999999999'
       },
       order_meta: {
-        return_url: orderData.return_url,
-        notify_url: orderData.notify_url,
-        payment_methods: 'cc,dc,nb,upi,app'
+        return_url: `${SITE_URL}/payment-success.html?order_id=${orderId}&email=${encodeURIComponent(email)}&product=${encodeURIComponent(product_name)}&amount=${totalAmount}`,
+        notify_url: `${SITE_URL}/.netlify/functions/verify-cashfree-payment`,
+        payment_methods: 'cc,dc,upi,nb,wallet'
       },
-      order_note: `Payment for ${orderData.product_name}`,
+      order_note: `Payment for ${product_name}`,
       order_tags: {
-        source: 'payform',
-        product: orderData.product_name,
-        form_admin_id: 'f807a8c3-316b-4df0-90e7-5f7796c86f71'
+        form_id: form_id,
+        form_admin_id: form_admin_id || 'default',
+        product_name: product_name
       }
     };
 
-    console.log('📤 Sending to Cashfree:', JSON.stringify(cashfreePayload, null, 2));
+    console.log('📤 Cashfree payload:', JSON.stringify(cashfreePayload, null, 2));
 
-    const response = await fetch(`${CASHFREE_CONFIG.base_url}/pg/orders`, {
+    // Call Cashfree API
+    console.log('📡 Making request to Cashfree...');
+    const cashfreeResponse = await fetch(cashfreeUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-version': CASHFREE_CONFIG.api_version,
-        'x-client-id': CASHFREE_CONFIG.app_id,
-        'x-client-secret': CASHFREE_CONFIG.secret_key
+        'x-api-version': '2023-08-01',
+        'x-client-id': CASHFREE_APP_ID,
+        'x-client-secret': CASHFREE_SECRET_KEY
       },
       body: JSON.stringify(cashfreePayload)
     });
 
-    const responseText = await response.text();
-    console.log('📥 Cashfree Response:');
-    console.log('Status:', response.status);
-    console.log('Body:', responseText);
+    console.log('📡 Cashfree response status:', cashfreeResponse.status);
+    console.log('📡 Cashfree response headers:', Object.fromEntries(cashfreeResponse.headers.entries()));
 
-    if (!response.ok) {
+    const cashfreeData = await cashfreeResponse.text();
+    console.log('📄 Cashfree raw response:', cashfreeData);
+
+    let cashfreeResult;
+    try {
+      cashfreeResult = JSON.parse(cashfreeData);
+      console.log('✅ Cashfree parsed response:', JSON.stringify(cashfreeResult, null, 2));
+    } catch (e) {
+      console.log('❌ Failed to parse Cashfree response as JSON');
       return {
-        success: false,
-        error: `Cashfree API error (${response.status}): ${responseText}`
+        statusCode: 500,
+        headers,
+        body: JSON.stringify({ 
+          error: 'Invalid response from payment provider',
+          raw_response: cashfreeData.substring(0, 500)
+        })
       };
     }
 
-    const responseData = JSON.parse(responseText);
-
-    if (responseData.cf_order_id && responseData.payment_session_id) {
-      console.log('✅ Cashfree order created successfully');
-      console.log('Payment Session ID:', responseData.payment_session_id);
-      
+    if (!cashfreeResponse.ok) {
+      console.log('❌ Cashfree API error:', cashfreeResult);
       return {
-        success: true,
-        data: responseData
-      };
-    } else {
-      return {
-        success: false,
-        error: 'Invalid response from Cashfree API - missing session ID'
+        statusCode: 500,
+        headers,
+        body: JSON.stringify({ 
+          error: 'Payment provider error',
+          details: cashfreeResult
+        })
       };
     }
 
-  } catch (error) {
-    console.error('❌ Cashfree order creation error:', error);
-    return {
-      success: false,
-      error: `Network error: ${error.message}`
-    };
-  }
-}
+    // Extract payment URL
+    const paymentUrl = cashfreeResult.payment_session_id ? 
+      `${cashfreeBaseUrl}/order/pay/${cashfreeResult.payment_session_id}` : 
+      cashfreeResult.payment_link;
 
-async function logTransactionToDatabase(transactionData) {
-  try {
-    console.log('💾 Logging transaction to database...');
+    console.log('🔗 Generated payment URL:', paymentUrl);
 
-    const { data, error } = await supabase
-      .from('transactions')
-      .insert([{
-        form_id: transactionData.form_id,
-        email: transactionData.customer_email,
-        customer_name: transactionData.customer_name,
-        product_name: transactionData.product_name,
-        payment_amount: transactionData.total_amount,
-        payment_currency: 'INR',
-        payment_status: 'pending',
-        payment_provider: 'cashfree',
-        transaction_id: transactionData.order_id,
-        cashfree_order_id: transactionData.cashfree_order_id,
-        admin_id: transactionData.form_admin_id,
-        gateway_fee: transactionData.commission_split.gatewayFee,
-        platform_commission: transactionData.commission_split.platformCommission,
-        net_amount_to_admin: transactionData.commission_split.formAdminAmount,
-        created_at: new Date().toISOString()
-      }])
-      .select()
-      .single();
-
-    if (error) {
+    if (!paymentUrl) {
+      console.log('❌ No payment URL in Cashfree response');
       return {
-        success: false,
-        error: error.message
+        statusCode: 500,
+        headers,
+        body: JSON.stringify({ 
+          error: 'No payment URL generated',
+          cashfree_response: cashfreeResult
+        })
       };
     }
 
-    return {
+    // Save transaction to database
+    if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+      try {
+        console.log('💾 Saving to database...');
+        const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+        
+        const { error: dbError } = await supabase.from('transactions').insert([{
+          form_id: form_id,
+          email: email,
+          customer_name: email.split('@')[0],
+          product_name: product_name,
+          payment_amount: totalAmount,
+          payment_currency: 'INR',
+          payment_status: 'pending',
+          payment_provider: 'cashfree',
+          transaction_id: orderId,
+          cashfree_order_id: orderId,
+          cashfree_payment_session_id: cashfreeResult.payment_session_id,
+          gateway_fee: gatewayFee,
+          platform_commission: platformCommission,
+          net_amount_to_admin: formAdminAmount,
+          admin_id: form_admin_id || 'default',
+          created_at: new Date().toISOString()
+        }]);
+
+        if (dbError) {
+          console.log('⚠️ Database save error:', dbError);
+        } else {
+          console.log('✅ Transaction saved to database');
+        }
+      } catch (dbError) {
+        console.log('⚠️ Database error:', dbError);
+      }
+    }
+
+    // Return success response
+    const response = {
       success: true,
-      data: data
+      payment_url: paymentUrl,
+      order_id: orderId,
+      payment_session_id: cashfreeResult.payment_session_id,
+      amount: totalAmount,
+      currency: 'INR',
+      customer_email: email,
+      product_name: product_name,
+      commission_breakdown: {
+        total_amount: totalAmount,
+        gateway_fee: gatewayFee.toFixed(2),
+        platform_commission: platformCommission.toFixed(2),
+        form_admin_amount: formAdminAmount.toFixed(2)
+      }
+    };
+
+    console.log('✅ Success response:', JSON.stringify(response, null, 2));
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify(response)
     };
 
   } catch (error) {
+    console.error('🚨 Function error:', error);
     return {
-      success: false,
-      error: error.message
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ 
+        error: 'Internal server error',
+        message: error.message,
+        stack: error.stack
+      })
     };
   }
-}
-
-function buildReturnUrl(orderId, amount) {
-  const baseUrl = process.env.URL || 'https://payform2025.netlify.app';
-  return `${baseUrl}/payment-success.html?order_id=${orderId}&amount=${amount}`;
-}
-
-function buildNotifyUrl() {
-  const baseUrl = process.env.URL || 'https://payform2025.netlify.app';
-  return `${baseUrl}/.netlify/functions/cashfree-webhook`;
-}
+};
