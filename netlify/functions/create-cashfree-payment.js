@@ -1,4 +1,4 @@
-// Fixed netlify/functions/create-cashfree-payment.js with proper URL handling
+// Fixed netlify/functions/create-cashfree-payment.js with correct URL format
 const { createClient } = require('@supabase/supabase-js');
 
 exports.handler = async (event, context) => {
@@ -164,32 +164,21 @@ exports.handler = async (event, context) => {
       };
     }
 
-    // FIXED: Proper payment URL construction based on Cashfree API response
+    // FIXED: Correct Cashfree URL format based on official documentation
     let paymentUrl = null;
     
-    // Log all available fields in Cashfree response for debugging
     console.log('🔍 Available fields in Cashfree response:', Object.keys(cashfreeResult));
     
-    // Try different possible URL formats from Cashfree
     if (cashfreeResult.payment_session_id) {
-      // Method 1: Use payment_session_id directly (most common)
-      paymentUrl = `${cashfreeBaseUrl}/checkout?order_token=${cashfreeResult.payment_session_id}`;
-      console.log('🔗 Using payment_session_id for URL:', paymentUrl);
-    } else if (cashfreeResult.order_token) {
-      // Method 2: Use order_token if available
-      paymentUrl = `${cashfreeBaseUrl}/checkout?order_token=${cashfreeResult.order_token}`;
-      console.log('🔗 Using order_token for URL:', paymentUrl);
-    } else if (cashfreeResult.payment_link) {
-      // Method 3: Use direct payment_link if provided
-      paymentUrl = cashfreeResult.payment_link;
-      console.log('🔗 Using direct payment_link:', paymentUrl);
+      // CORRECT format for Cashfree Checkout - use payment_session_id directly
+      paymentUrl = `https://payments${CASHFREE_ENVIRONMENT === 'production' ? '' : '-test'}.cashfree.com/order/#${cashfreeResult.payment_session_id}`;
+      console.log('🔗 Using Cashfree Checkout URL format:', paymentUrl);
     } else if (cashfreeResult.cf_order_id) {
-      // Method 4: Fallback - construct URL with cf_order_id
-      paymentUrl = `${cashfreeBaseUrl}/checkout/${cashfreeResult.cf_order_id}`;
-      console.log('🔗 Using cf_order_id for URL:', paymentUrl);
+      // Alternative: Use cf_order_id
+      paymentUrl = `https://payments${CASHFREE_ENVIRONMENT === 'production' ? '' : '-test'}.cashfree.com/order/${cashfreeResult.cf_order_id}`;
+      console.log('🔗 Using cf_order_id URL format:', paymentUrl);
     }
     
-    // If we still don't have a payment URL, return error with full response for debugging
     if (!paymentUrl) {
       console.log('❌ No payment URL could be constructed');
       return {
@@ -199,8 +188,7 @@ exports.handler = async (event, context) => {
           error: 'No payment URL generated',
           debug_info: {
             cashfree_response: cashfreeResult,
-            available_fields: Object.keys(cashfreeResult),
-            expected_fields: ['payment_session_id', 'order_token', 'payment_link', 'cf_order_id']
+            available_fields: Object.keys(cashfreeResult)
           }
         })
       };
@@ -208,7 +196,7 @@ exports.handler = async (event, context) => {
 
     console.log('✅ Final payment URL:', paymentUrl);
 
-    // Save transaction to database
+    // Save transaction to database - FIXED: Remove non-existent column
     if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
       try {
         console.log('💾 Saving to database...');
@@ -225,7 +213,7 @@ exports.handler = async (event, context) => {
           payment_provider: 'cashfree',
           transaction_id: orderId,
           cashfree_order_id: cashfreeResult.cf_order_id || orderId,
-          cashfree_payment_session_id: cashfreeResult.payment_session_id,
+          // REMOVED: cashfree_payment_session_id (column doesn't exist)
           gateway_fee: gatewayFee,
           platform_commission: platformCommission,
           net_amount_to_admin: formAdminAmount,
@@ -250,7 +238,6 @@ exports.handler = async (event, context) => {
       order_id: orderId,
       cf_order_id: cashfreeResult.cf_order_id,
       payment_session_id: cashfreeResult.payment_session_id,
-      order_token: cashfreeResult.order_token,
       amount: totalAmount,
       currency: 'INR',
       customer_email: email,
@@ -260,9 +247,7 @@ exports.handler = async (event, context) => {
         gateway_fee: gatewayFee.toFixed(2),
         platform_commission: platformCommission.toFixed(2),
         form_admin_amount: formAdminAmount.toFixed(2)
-      },
-      // Debug info (remove in production)
-      debug_cashfree_response: cashfreeResult
+      }
     };
 
     console.log('✅ Success response:', JSON.stringify(response, null, 2));
