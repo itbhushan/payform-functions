@@ -1,9 +1,8 @@
-// Enhanced netlify/functions/create-cashfree-payment.js
+// Corrected netlify/functions/create-cashfree-payment.js
 const { createClient } = require('@supabase/supabase-js');
 
 exports.handler = async (event, context) => {
   console.log('🚀 Function started');
-  console.log('📋 Event:', JSON.stringify(event, null, 2));
 
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -17,7 +16,6 @@ exports.handler = async (event, context) => {
   }
 
   if (event.httpMethod !== 'POST') {
-    console.log('❌ Invalid method:', event.httpMethod);
     return {
       statusCode: 405,
       headers,
@@ -26,13 +24,11 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    // Parse request body
     let requestData;
     try {
       requestData = JSON.parse(event.body);
       console.log('📥 Request data:', JSON.stringify(requestData, null, 2));
     } catch (e) {
-      console.log('❌ Invalid JSON in request body');
       return {
         statusCode: 400,
         headers,
@@ -41,6 +37,7 @@ exports.handler = async (event, context) => {
     }
 
     const { form_id, email, product_name, product_price, form_admin_id } = requestData;
+    const customer_name = requestData.customer_name || email?.split('@')[0] || 'Customer';
 
     // Validate required fields
     if (!form_id || !email || !product_name || !product_price) {
@@ -50,7 +47,8 @@ exports.handler = async (event, context) => {
         headers,
         body: JSON.stringify({ 
           error: 'Missing required fields',
-          required: ['form_id', 'email', 'product_name', 'product_price']
+          required: ['form_id', 'email', 'product_name', 'product_price'],
+          received: { form_id: !!form_id, email: !!email, product_name: !!product_name, product_price: !!product_price }
         })
       };
     }
@@ -67,11 +65,8 @@ exports.handler = async (event, context) => {
     console.log('- CASHFREE_APP_ID:', CASHFREE_APP_ID ? '✅ Set' : '❌ Missing');
     console.log('- CASHFREE_SECRET_KEY:', CASHFREE_SECRET_KEY ? '✅ Set' : '❌ Missing');
     console.log('- CASHFREE_ENVIRONMENT:', CASHFREE_ENVIRONMENT);
-    console.log('- SUPABASE_URL:', SUPABASE_URL ? '✅ Set' : '❌ Missing');
-    console.log('- SITE_URL:', SITE_URL);
 
     if (!CASHFREE_APP_ID || !CASHFREE_SECRET_KEY) {
-      console.log('❌ Missing Cashfree credentials');
       return {
         statusCode: 500,
         headers,
@@ -103,28 +98,22 @@ exports.handler = async (event, context) => {
     const cashfreeUrl = `${cashfreeBaseUrl}/orders`;
     console.log('🌐 Cashfree API URL:', cashfreeUrl);
 
-    // Prepare Cashfree payment request
+    // Prepare Cashfree payment request - FIXED format
     const cashfreePayload = {
       order_id: orderId,
       order_amount: totalAmount,
       order_currency: 'INR',
       customer_details: {
-        customer_id: email.replace('@', '_at_').replace('.', '_dot_'),
-        customer_name: email.split('@')[0],
+        customer_id: email.replace('@', '_at_').replace(/\./g, '_dot_'),
+        customer_name: customer_name,
         customer_email: email,
         customer_phone: '9999999999'
       },
       order_meta: {
         return_url: `${SITE_URL}/payment-success.html?order_id=${orderId}&email=${encodeURIComponent(email)}&product=${encodeURIComponent(product_name)}&amount=${totalAmount}`,
-        notify_url: `${SITE_URL}/.netlify/functions/verify-cashfree-payment`,
-        payment_methods: 'cc,dc,upi,nb,wallet'
+        notify_url: `${SITE_URL}/.netlify/functions/verify-cashfree-payment`
       },
-      order_note: `Payment for ${product_name}`,
-      order_tags: {
-        form_id: form_id,
-        form_admin_id: form_admin_id || 'default',
-        product_name: product_name
-      }
+      order_note: `Payment for ${product_name}`
     };
 
     console.log('📤 Cashfree payload:', JSON.stringify(cashfreePayload, null, 2));
@@ -143,8 +132,7 @@ exports.handler = async (event, context) => {
     });
 
     console.log('📡 Cashfree response status:', cashfreeResponse.status);
-    console.log('📡 Cashfree response headers:', Object.fromEntries(cashfreeResponse.headers.entries()));
-
+    
     const cashfreeData = await cashfreeResponse.text();
     console.log('📄 Cashfree raw response:', cashfreeData);
 
@@ -171,20 +159,21 @@ exports.handler = async (event, context) => {
         headers,
         body: JSON.stringify({ 
           error: 'Payment provider error',
-          details: cashfreeResult
+          details: cashfreeResult,
+          status: cashfreeResponse.status
         })
       };
     }
 
-    // Extract payment URL
-    const paymentUrl = cashfreeResult.payment_session_id ? 
-      `${cashfreeBaseUrl}/order/pay/${cashfreeResult.payment_session_id}` : 
-      cashfreeResult.payment_link;
-
-    console.log('🔗 Generated payment URL:', paymentUrl);
-
-    if (!paymentUrl) {
-      console.log('❌ No payment URL in Cashfree response');
+    // Extract payment URL - Cashfree provides payment_session_id
+    let paymentUrl;
+    if (cashfreeResult.payment_session_id) {
+      // This is the correct format for Cashfree checkout
+      paymentUrl = `${cashfreeBaseUrl}/checkout?order_token=${cashfreeResult.order_token}`;
+    } else if (cashfreeResult.payment_link) {
+      paymentUrl = cashfreeResult.payment_link;
+    } else {
+      console.log('❌ No payment URL found in Cashfree response');
       return {
         statusCode: 500,
         headers,
@@ -195,6 +184,8 @@ exports.handler = async (event, context) => {
       };
     }
 
+    console.log('🔗 Generated payment URL:', paymentUrl);
+
     // Save transaction to database
     if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
       try {
@@ -204,7 +195,7 @@ exports.handler = async (event, context) => {
         const { error: dbError } = await supabase.from('transactions').insert([{
           form_id: form_id,
           email: email,
-          customer_name: email.split('@')[0],
+          customer_name: customer_name,
           product_name: product_name,
           payment_amount: totalAmount,
           payment_currency: 'INR',
@@ -236,6 +227,7 @@ exports.handler = async (event, context) => {
       payment_url: paymentUrl,
       order_id: orderId,
       payment_session_id: cashfreeResult.payment_session_id,
+      order_token: cashfreeResult.order_token,
       amount: totalAmount,
       currency: 'INR',
       customer_email: email,
@@ -263,8 +255,7 @@ exports.handler = async (event, context) => {
       headers,
       body: JSON.stringify({ 
         error: 'Internal server error',
-        message: error.message,
-        stack: error.stack
+        message: error.message
       })
     };
   }
