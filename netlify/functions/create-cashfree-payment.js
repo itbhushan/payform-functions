@@ -1,4 +1,4 @@
-// Corrected netlify/functions/create-cashfree-payment.js
+// Fixed netlify/functions/create-cashfree-payment.js with proper URL handling
 const { createClient } = require('@supabase/supabase-js');
 
 exports.handler = async (event, context) => {
@@ -47,8 +47,7 @@ exports.handler = async (event, context) => {
         headers,
         body: JSON.stringify({ 
           error: 'Missing required fields',
-          required: ['form_id', 'email', 'product_name', 'product_price'],
-          received: { form_id: !!form_id, email: !!email, product_name: !!product_name, product_price: !!product_price }
+          required: ['form_id', 'email', 'product_name', 'product_price']
         })
       };
     }
@@ -98,7 +97,7 @@ exports.handler = async (event, context) => {
     const cashfreeUrl = `${cashfreeBaseUrl}/orders`;
     console.log('🌐 Cashfree API URL:', cashfreeUrl);
 
-    // Prepare Cashfree payment request - FIXED format
+    // Prepare Cashfree payment request
     const cashfreePayload = {
       order_id: orderId,
       order_amount: totalAmount,
@@ -165,26 +164,49 @@ exports.handler = async (event, context) => {
       };
     }
 
-    // Extract payment URL - Cashfree provides payment_session_id
-    let paymentUrl;
+    // FIXED: Proper payment URL construction based on Cashfree API response
+    let paymentUrl = null;
+    
+    // Log all available fields in Cashfree response for debugging
+    console.log('🔍 Available fields in Cashfree response:', Object.keys(cashfreeResult));
+    
+    // Try different possible URL formats from Cashfree
     if (cashfreeResult.payment_session_id) {
-      // This is the correct format for Cashfree checkout
+      // Method 1: Use payment_session_id directly (most common)
+      paymentUrl = `${cashfreeBaseUrl}/checkout?order_token=${cashfreeResult.payment_session_id}`;
+      console.log('🔗 Using payment_session_id for URL:', paymentUrl);
+    } else if (cashfreeResult.order_token) {
+      // Method 2: Use order_token if available
       paymentUrl = `${cashfreeBaseUrl}/checkout?order_token=${cashfreeResult.order_token}`;
+      console.log('🔗 Using order_token for URL:', paymentUrl);
     } else if (cashfreeResult.payment_link) {
+      // Method 3: Use direct payment_link if provided
       paymentUrl = cashfreeResult.payment_link;
-    } else {
-      console.log('❌ No payment URL found in Cashfree response');
+      console.log('🔗 Using direct payment_link:', paymentUrl);
+    } else if (cashfreeResult.cf_order_id) {
+      // Method 4: Fallback - construct URL with cf_order_id
+      paymentUrl = `${cashfreeBaseUrl}/checkout/${cashfreeResult.cf_order_id}`;
+      console.log('🔗 Using cf_order_id for URL:', paymentUrl);
+    }
+    
+    // If we still don't have a payment URL, return error with full response for debugging
+    if (!paymentUrl) {
+      console.log('❌ No payment URL could be constructed');
       return {
         statusCode: 500,
         headers,
         body: JSON.stringify({ 
           error: 'No payment URL generated',
-          cashfree_response: cashfreeResult
+          debug_info: {
+            cashfree_response: cashfreeResult,
+            available_fields: Object.keys(cashfreeResult),
+            expected_fields: ['payment_session_id', 'order_token', 'payment_link', 'cf_order_id']
+          }
         })
       };
     }
 
-    console.log('🔗 Generated payment URL:', paymentUrl);
+    console.log('✅ Final payment URL:', paymentUrl);
 
     // Save transaction to database
     if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
@@ -202,7 +224,7 @@ exports.handler = async (event, context) => {
           payment_status: 'pending',
           payment_provider: 'cashfree',
           transaction_id: orderId,
-          cashfree_order_id: orderId,
+          cashfree_order_id: cashfreeResult.cf_order_id || orderId,
           cashfree_payment_session_id: cashfreeResult.payment_session_id,
           gateway_fee: gatewayFee,
           platform_commission: platformCommission,
@@ -226,6 +248,7 @@ exports.handler = async (event, context) => {
       success: true,
       payment_url: paymentUrl,
       order_id: orderId,
+      cf_order_id: cashfreeResult.cf_order_id,
       payment_session_id: cashfreeResult.payment_session_id,
       order_token: cashfreeResult.order_token,
       amount: totalAmount,
@@ -237,7 +260,9 @@ exports.handler = async (event, context) => {
         gateway_fee: gatewayFee.toFixed(2),
         platform_commission: platformCommission.toFixed(2),
         form_admin_amount: formAdminAmount.toFixed(2)
-      }
+      },
+      // Debug info (remove in production)
+      debug_cashfree_response: cashfreeResult
     };
 
     console.log('✅ Success response:', JSON.stringify(response, null, 2));
