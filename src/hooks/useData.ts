@@ -318,7 +318,7 @@ export const useCashfreeConfig = (adminId?: string) => {
   return { config, loading, error, saveConfig, refetch: loadConfig };
 };
 
-// Hook for form configurations
+// Hook for form configurations (CORRECTED COLUMN NAME)
 export const useFormConfigs = (adminId?: string) => {
   const [forms, setForms] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -333,10 +333,11 @@ export const useFormConfigs = (adminId?: string) => {
     try {
       console.log('Loading forms for admin:', adminId);
       
+      // CORRECTED: Use 'admin_id' instead of 'form_admin_id'
       const { data, error } = await supabase
         .from('form_configs')
         .select('*')
-        .eq('form_admin_id', adminId)
+        .eq('admin_id', adminId)
         .order('created_at', { ascending: false });
 
       if (error) {
