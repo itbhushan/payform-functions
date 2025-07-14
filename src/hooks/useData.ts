@@ -1,365 +1,291 @@
-// src/hooks/useData.ts
-import { useState, useEffect } from 'react';
+// src/hooks/useAuth.ts
+import { useState, useEffect, createContext, useContext } from 'react';
 import { supabase } from '../lib/supabase';
+import type { User, Session } from '@supabase/supabase-js';
 
-export interface Transaction {
-  id: number;
-  transaction_id: string;
-  email: string;
-  customer_name?: string;
-  product_name?: string;
-  payment_amount: number;
-  payment_currency: string;
-  payment_status: string;
-  payment_provider: string;
-  admin_id?: string;
-  created_at: string;
-  // Commission fields (calculated)
-  gateway_fee?: number;
-  platform_commission?: number;
-  net_amount_to_admin?: number;
+interface AuthUser extends User {
+  profile?: {
+    name?: string;
+    company_name?: string;
+    is_active?: boolean;
+  };
 }
 
-export interface DashboardStats {
-  totalSales: number;
-  totalTransactions: number;
-  completedTransactions: number;
-  pendingTransactions: number;
-  totalEarnings: number;
-  platformCommission: number;
+interface AuthContextType {
+  user: AuthUser | null;
+  session: Session | null;
+  loading: boolean;
+  signUp: (email: string, password: string, name: string) => Promise<any>;
+  signIn: (email: string, password: string) => Promise<any>;
+  signOut: () => Promise<void>;
+  resetPassword: (email: string) => Promise<any>;
+  updateProfile: (updates: any) => Promise<any>;
+  isFormAdmin: boolean;
+  isSuperAdmin: boolean;
 }
 
-// Commission calculation functions
-const calculateGatewayFee = (amount: number): number => {
-  return (amount * 0.025) + 3; // 2.5% + ₹3 for Cashfree
-};
+const AuthContext = createContext<AuthContextType | null>(null);
 
-const calculatePlatformCommission = (amount: number): number => {
-  return amount * 0.03; // 3% platform commission
-};
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
 
-const calculateNetAmount = (amount: number): number => {
-  const gatewayFee = calculateGatewayFee(amount);
-  const platformCommission = calculatePlatformCommission(amount);
-  return amount - gatewayFee - platformCommission;
-};
+  useEffect(() => {
+    // Get initial session
+    getInitialSession();
 
-// Hook for dashboard data (Form Admin view)
-export const useDashboardData = (adminId?: string) => {
-  const [data, setData] = useState<DashboardStats | null>(null);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const loadData = async () => {
-    if (!adminId) {
-      setData(null);
-      setTransactions([]);
-      return;
-    }
-    
-    setLoading(true);
-    setError(null);
-    
-    try {
-      console.log('Loading data for admin:', adminId);
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth state changed:', event, session);
       
-      // Fetch transactions for this admin
-      const { data: transactionData, error: transactionError } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('admin_id', adminId)
-        .order('created_at', { ascending: false })
-        .limit(50);
-
-      if (transactionError) {
-        console.error('Transaction error:', transactionError);
-        throw transactionError;
+      if (session?.user) {
+        await loadUserProfile(session.user);
+      } else {
+        setUser(null);
       }
-
-      const transactions = transactionData || [];
-      console.log('Loaded transactions:', transactions.length);
-
-      // Calculate commission for each transaction
-      const enrichedTransactions = transactions.map(t => ({
-        ...t,
-        gateway_fee: calculateGatewayFee(t.payment_amount),
-        platform_commission: calculatePlatformCommission(t.payment_amount),
-        net_amount_to_admin: calculateNetAmount(t.payment_amount)
-      }));
-
-      setTransactions(enrichedTransactions);
-
-      // Calculate dashboard stats
-      const stats: DashboardStats = {
-        totalSales: transactions.reduce((sum, t) => sum + t.payment_amount, 0),
-        totalTransactions: transactions.length,
-        completedTransactions: transactions.filter(t => t.payment_status === 'paid').length,
-        pendingTransactions: transactions.filter(t => t.payment_status === 'pending').length,
-        totalEarnings: enrichedTransactions.reduce((sum, t) => sum + (t.net_amount_to_admin || 0), 0),
-        platformCommission: enrichedTransactions.reduce((sum, t) => sum + (t.platform_commission || 0), 0)
-      };
-
-      setData(stats);
-      console.log('Calculated stats:', stats);
       
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to load data';
-      setError(errorMessage);
-      console.error('Error loading dashboard data:', err);
-    } finally {
+      setSession(session);
       setLoading(false);
-    }
-  };
+    });
 
-  useEffect(() => {
-    loadData();
-  }, [adminId]);
-
-  return { data, transactions, loading, error, refetch: loadData };
-};
-
-// Hook for form admin profile
-export const useFormAdmin = (adminId?: string) => {
-  const [admin, setAdmin] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const loadAdmin = async () => {
-      if (!adminId) return;
-      
-      setLoading(true);
-      setError(null);
-      
-      try {
-        console.log('Loading admin profile for:', adminId);
-        
-        const { data, error } = await supabase
-          .from('form_admins')
-          .select('*')
-          .eq('id', adminId)
-          .single();
-
-        if (error) {
-          console.error('Admin profile error:', error);
-          throw error;
-        }
-        
-        setAdmin(data);
-        console.log('Loaded admin profile:', data);
-        
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Failed to load admin profile';
-        setError(errorMessage);
-        console.error('Error loading admin:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadAdmin();
-  }, [adminId]);
-
-  return { admin, loading, error };
-};
-
-// Hook for super admin data (platform overview)
-export const usePlatformData = () => {
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const loadPlatformData = async () => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      console.log('Loading platform data...');
-      
-      // Get all transactions across all admins
-      const { data: allTransactions, error: transError } = await supabase
-        .from('transactions')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(100);
-
-      // Get all form admins
-      const { data: allAdmins, error: adminError } = await supabase
-        .from('form_admins')
-        .select('*')
-        .eq('is_active', true);
-
-      if (transError) {
-        console.error('Platform transactions error:', transError);
-        throw transError;
-      }
-      
-      if (adminError) {
-        console.error('Platform admins error:', adminError);
-        throw adminError;
-      }
-
-      const transactions = allTransactions || [];
-      const admins = allAdmins || [];
-      
-      console.log('Platform data loaded:', { 
-        transactionCount: transactions.length, 
-        adminCount: admins.length 
-      });
-
-      const totalRevenue = transactions.reduce((sum, t) => sum + t.payment_amount, 0);
-      const totalCommission = totalRevenue * 0.03; // 3% platform commission
-      const completedTransactions = transactions.filter(t => t.payment_status === 'paid').length;
-
-      setData({
-        totalFormAdmins: admins.length,
-        totalTransactions: transactions.length,
-        completedTransactions,
-        pendingTransactions: transactions.length - completedTransactions,
-        totalRevenue,
-        platformCommission: totalCommission,
-        monthlyGrowth: 15.5, // Mock data for now
-        recentTransactions: transactions.slice(0, 10)
-      });
-
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to load platform data';
-      setError(errorMessage);
-      console.error('Error loading platform data:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadPlatformData();
+    return () => subscription.unsubscribe();
   }, []);
 
-  return { data, loading, error, refetch: loadPlatformData };
-};
-
-// Hook for Cashfree configuration
-export const useCashfreeConfig = (adminId?: string) => {
-  const [config, setConfig] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const loadConfig = async () => {
-    if (!adminId) return;
-    
-    setLoading(true);
-    setError(null);
-    
+  const getInitialSession = async () => {
     try {
-      console.log('Loading Cashfree config for:', adminId);
+      const { data: { session }, error } = await supabase.auth.getSession();
       
-      const { data, error } = await supabase
-        .from('provider_configs')
-        .select('*')
-        .eq('admin_id', adminId)
-        .eq('provider_name', 'cashfree')
-        .single();
+      if (error) {
+        console.error('Error getting session:', error);
+        return;
+      }
 
-      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
-        console.error('Cashfree config error:', error);
-        throw error;
+      if (session?.user) {
+        await loadUserProfile(session.user);
       }
       
-      setConfig(data);
-      console.log('Loaded Cashfree config:', data);
-      
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to load Cashfree config';
-      setError(errorMessage);
-      console.error('Error loading Cashfree config:', err);
+      setSession(session);
+    } catch (error) {
+      console.error('Error in getInitialSession:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const saveConfig = async (configData: any) => {
-    if (!adminId) return { success: false, error: 'Admin ID required' };
-    
+  const loadUserProfile = async (authUser: User) => {
     try {
-      console.log('Saving Cashfree config:', configData);
+      console.log('Loading profile for user:', authUser.id);
       
+      const { data: profile, error } = await supabase
+        .from('form_admins')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error loading profile:', error);
+        // If profile doesn't exist, create it
+        if (error.code === 'PGRST116') {
+          await createUserProfile(authUser);
+          return;
+        }
+      }
+
+      const userWithProfile: AuthUser = {
+        ...authUser,
+        profile: profile || undefined
+      };
+
+      setUser(userWithProfile);
+      console.log('User profile loaded:', userWithProfile);
+    } catch (error) {
+      console.error('Error loading user profile:', error);
+      setUser(authUser as AuthUser);
+    }
+  };
+
+  const createUserProfile = async (authUser: User) => {
+    try {
       const { error } = await supabase
-        .from('provider_configs')
-        .upsert({
-          admin_id: adminId,
-          provider_name: 'cashfree',
-          config_data: configData,
-          is_enabled: true,
-          verification_status: 'pending',
-          updated_at: new Date().toISOString()
+        .from('form_admins')
+        .insert({
+          id: authUser.id,
+          email: authUser.email!,
+          name: authUser.user_metadata?.name || authUser.email?.split('@')[0],
+          is_active: true
         });
 
       if (error) {
-        console.error('Save config error:', error);
-        throw error;
+        console.error('Error creating profile:', error);
+      } else {
+        console.log('Profile created successfully');
+        await loadUserProfile(authUser);
       }
-      
-      console.log('Cashfree config saved successfully');
-      await loadConfig(); // Reload config after save
-      return { success: true };
-      
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to save config';
-      console.error('Error saving Cashfree config:', err);
-      return { success: false, error: errorMessage };
+    } catch (error) {
+      console.error('Error in createUserProfile:', error);
     }
   };
 
-  useEffect(() => {
-    loadConfig();
-  }, [adminId]);
-
-  return { config, loading, error, saveConfig, refetch: loadConfig };
-};
-
-// Hook for form configurations (CORRECTED COLUMN NAME)
-export const useFormConfigs = (adminId?: string) => {
-  const [forms, setForms] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const loadForms = async () => {
-    if (!adminId) return;
-    
-    setLoading(true);
-    setError(null);
-    
+  const signUp = async (email: string, password: string, name: string) => {
     try {
-      console.log('Loading forms for admin:', adminId);
+      setLoading(true);
       
-      // CORRECTED: Use 'admin_id' instead of 'form_admin_id'
-      const { data, error } = await supabase
-        .from('form_configs')
-        .select('*')
-        .eq('admin_id', adminId)
-        .order('created_at', { ascending: false });
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            name: name
+          }
+        }
+      });
 
-      if (error) {
-        console.error('Forms error:', error);
-        throw error;
-      }
-      
-      setForms(data || []);
-      console.log('Loaded forms:', data?.length || 0);
-      
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to load forms';
-      setError(errorMessage);
-      console.error('Error loading forms:', err);
+      if (error) throw error;
+
+      console.log('Sign up successful:', data);
+      return { data, error: null };
+    } catch (error) {
+      console.error('Sign up error:', error);
+      return { data: null, error };
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    loadForms();
-  }, [adminId]);
+  const signIn = async (email: string, password: string) => {
+    try {
+      setLoading(true);
+      
+      // For super admin demo access (still using demo credentials for convenience)
+      if (email === 'admin@payform.com' && password === 'admin123') {
+        // Check if super admin exists in database
+        const { data: superAdmin, error } = await supabase
+          .from('form_admins')
+          .select('*')
+          .eq('email', 'admin@payform.com')
+          .single();
 
-  return { forms, loading, error, refetch: loadForms };
+        if (superAdmin) {
+          // Create a session-like object for super admin
+          const superAdminUser: AuthUser = {
+            id: superAdmin.id, // Use the real UUID from database
+            email: 'admin@payform.com',
+            created_at: new Date().toISOString(),
+            aud: 'authenticated',
+            role: 'authenticated',
+            app_metadata: {},
+            user_metadata: { role: 'super_admin', name: 'PayForm Admin' },
+            profile: {
+              name: 'PayForm Admin',
+              is_active: true
+            }
+          };
+          
+          setUser(superAdminUser);
+          setSession({
+            access_token: 'super-admin-token',
+            refresh_token: 'super-admin-refresh',
+            expires_in: 3600,
+            token_type: 'bearer',
+            user: superAdminUser
+          } as Session);
+          
+          return { data: { user: superAdminUser }, error: null };
+        }
+      }
+
+      // For all other users, use real Supabase auth
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if (error) throw error;
+
+      console.log('Sign in successful:', data);
+      return { data, error: null };
+    } catch (error) {
+      console.error('Sign in error:', error);
+      return { data: null, error };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const signOut = async () => {
+    try {
+      // Handle super admin logout (demo credentials)
+      if (user?.email === 'admin@payform.com' && session?.access_token === 'super-admin-token') {
+        setUser(null);
+        setSession(null);
+        return;
+      }
+
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      
+      setUser(null);
+      setSession(null);
+    } catch (error) {
+      console.error('Sign out error:', error);
+    }
+  };
+
+  const resetPassword = async (email: string) => {
+    try {
+      const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`
+      });
+
+      if (error) throw error;
+      return { data, error: null };
+    } catch (error) {
+      console.error('Password reset error:', error);
+      return { data: null, error };
+    }
+  };
+
+  const updateProfile = async (updates: any) => {
+    try {
+      if (!user) throw new Error('No user logged in');
+
+      const { error } = await supabase
+        .from('form_admins')
+        .update(updates)
+        .eq('id', user.id);
+
+      if (error) throw error;
+
+      // Reload user profile
+      await loadUserProfile(user);
+      return { error: null };
+    } catch (error) {
+      console.error('Profile update error:', error);
+      return { error };
+    }
+  };
+
+  const value: AuthContextType = {
+    user,
+    session,
+    loading,
+    signUp,
+    signIn,
+    signOut,
+    resetPassword,
+    updateProfile,
+    isFormAdmin: user?.email !== 'admin@payform.com',
+    isSuperAdmin: user?.email === 'admin@payform.com'
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
+
+export const useAuth = (): AuthContextType => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return context;
 };
