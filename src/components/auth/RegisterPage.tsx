@@ -37,12 +37,6 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onSwitchToLogin }) =
       return;
     }
 
-    if (!formData.name.trim()) {
-      setError('Please enter your full name');
-      setLoading(false);
-      return;
-    }
-
     try {
       const { error } = await signUp(formData.email, formData.password, formData.name);
       
@@ -176,7 +170,6 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onSwitchToLogin }) =
           <li>• <strong>Accept UPI, Cards, Net Banking</strong> - all Indian payment methods</li>
           <li>• <strong>Keep 97% of revenue</strong> (only 3% platform fee)</li>
           <li>• <strong>Instant settlement</strong> directly to your bank account</li>
-          <li>• <strong>Real-time analytics</strong> and earnings dashboard</li>
         </ul>
       </div>
     </div>
