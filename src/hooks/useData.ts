@@ -1,9 +1,14 @@
 // src/hooks/useAuth.ts
 import { useState, useEffect, createContext, useContext } from 'react';
 import { supabase } from '../lib/supabase';
-import type { User, Session } from '@supabase/supabase-js';
 
-interface AuthUser extends User {
+interface User {
+  id: string;
+  email: string;
+  user_metadata?: {
+    role?: 'form_admin' | 'super_admin';
+    name?: string;
+  };
   profile?: {
     name?: string;
     company_name?: string;
@@ -12,8 +17,7 @@ interface AuthUser extends User {
 }
 
 interface AuthContextType {
-  user: AuthUser | null;
-  session: Session | null;
+  user: User | null;
   loading: boolean;
   signUp: (email: string, password: string, name: string) => Promise<any>;
   signIn: (email: string, password: string) => Promise<any>;
@@ -27,105 +31,22 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Get initial session
-    getInitialSession();
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state changed:', event, session);
-      
-      if (session?.user) {
-        await loadUserProfile(session.user);
-      } else {
-        setUser(null);
+    // Check for stored user first (for demo purposes)
+    const storedUser = localStorage.getItem('payform_user');
+    if (storedUser) {
+      try {
+        setUser(JSON.parse(storedUser));
+      } catch (error) {
+        console.error('Error parsing stored user:', error);
+        localStorage.removeItem('payform_user');
       }
-      
-      setSession(session);
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    }
+    setLoading(false);
   }, []);
-
-  const getInitialSession = async () => {
-    try {
-      const { data: { session }, error } = await supabase.auth.getSession();
-      
-      if (error) {
-        console.error('Error getting session:', error);
-        return;
-      }
-
-      if (session?.user) {
-        await loadUserProfile(session.user);
-      }
-      
-      setSession(session);
-    } catch (error) {
-      console.error('Error in getInitialSession:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadUserProfile = async (authUser: User) => {
-    try {
-      console.log('Loading profile for user:', authUser.id);
-      
-      const { data: profile, error } = await supabase
-        .from('form_admins')
-        .select('*')
-        .eq('id', authUser.id)
-        .single();
-
-      if (error && error.code !== 'PGRST116') {
-        console.error('Error loading profile:', error);
-        // If profile doesn't exist, create it
-        if (error.code === 'PGRST116') {
-          await createUserProfile(authUser);
-          return;
-        }
-      }
-
-      const userWithProfile: AuthUser = {
-        ...authUser,
-        profile: profile || undefined
-      };
-
-      setUser(userWithProfile);
-      console.log('User profile loaded:', userWithProfile);
-    } catch (error) {
-      console.error('Error loading user profile:', error);
-      setUser(authUser as AuthUser);
-    }
-  };
-
-  const createUserProfile = async (authUser: User) => {
-    try {
-      const { error } = await supabase
-        .from('form_admins')
-        .insert({
-          id: authUser.id,
-          email: authUser.email!,
-          name: authUser.user_metadata?.name || authUser.email?.split('@')[0],
-          is_active: true
-        });
-
-      if (error) {
-        console.error('Error creating profile:', error);
-      } else {
-        console.log('Profile created successfully');
-        await loadUserProfile(authUser);
-      }
-    } catch (error) {
-      console.error('Error in createUserProfile:', error);
-    }
-  };
 
   const signUp = async (email: string, password: string, name: string) => {
     try {
@@ -135,9 +56,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         email,
         password,
         options: {
-          data: {
-            name: name
-          }
+          data: { name }
         }
       });
 
@@ -157,45 +76,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       setLoading(true);
       
-      // For super admin demo access (still using demo credentials for convenience)
+      // Handle demo super admin
       if (email === 'admin@payform.com' && password === 'admin123') {
-        // Check if super admin exists in database
-        const { data: superAdmin, error } = await supabase
-          .from('form_admins')
-          .select('*')
-          .eq('email', 'admin@payform.com')
-          .single();
-
-        if (superAdmin) {
-          // Create a session-like object for super admin
-          const superAdminUser: AuthUser = {
-            id: superAdmin.id, // Use the real UUID from database
-            email: 'admin@payform.com',
-            created_at: new Date().toISOString(),
-            aud: 'authenticated',
-            role: 'authenticated',
-            app_metadata: {},
-            user_metadata: { role: 'super_admin', name: 'PayForm Admin' },
-            profile: {
-              name: 'PayForm Admin',
-              is_active: true
-            }
-          };
-          
-          setUser(superAdminUser);
-          setSession({
-            access_token: 'super-admin-token',
-            refresh_token: 'super-admin-refresh',
-            expires_in: 3600,
-            token_type: 'bearer',
-            user: superAdminUser
-          } as Session);
-          
-          return { data: { user: superAdminUser }, error: null };
-        }
+        const superAdminUser: User = {
+          id: 'super-admin-123',
+          email: 'admin@payform.com',
+          user_metadata: { role: 'super_admin', name: 'PayForm Admin' },
+          profile: { name: 'PayForm Admin', is_active: true }
+        };
+        
+        setUser(superAdminUser);
+        localStorage.setItem('payform_user', JSON.stringify(superAdminUser));
+        return { data: { user: superAdminUser }, error: null };
       }
 
-      // For all other users, use real Supabase auth
+      // Handle demo form admin
+      if (email === 'formadmin@example.com' && password === 'form123') {
+        const formAdminUser: User = {
+          id: 'f807a8c3-316b-4df0-90e7-5f7796c86f71',
+          email: 'formadmin@example.com',
+          user_metadata: { role: 'form_admin', name: 'Bhushan Agrawal' },
+          profile: { name: 'Bhushan Agrawal', is_active: true }
+        };
+        
+        setUser(formAdminUser);
+        localStorage.setItem('payform_user', JSON.stringify(formAdminUser));
+        return { data: { user: formAdminUser }, error: null };
+      }
+
+      // For real users, use Supabase auth
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password
@@ -203,7 +112,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (error) throw error;
 
-      console.log('Sign in successful:', data);
+      if (data.user) {
+        // Load user profile from form_admins table
+        const { data: profile } = await supabase
+          .from('form_admins')
+          .select('*')
+          .eq('id', data.user.id)
+          .single();
+
+        const userWithProfile: User = {
+          id: data.user.id,
+          email: data.user.email!,
+          user_metadata: data.user.user_metadata,
+          profile: profile || undefined
+        };
+
+        setUser(userWithProfile);
+        localStorage.setItem('payform_user', JSON.stringify(userWithProfile));
+      }
+
       return { data, error: null };
     } catch (error) {
       console.error('Sign in error:', error);
@@ -215,18 +142,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOut = async () => {
     try {
-      // Handle super admin logout (demo credentials)
-      if (user?.email === 'admin@payform.com' && session?.access_token === 'super-admin-token') {
+      // Handle demo users
+      if (user?.email === 'admin@payform.com' || user?.email === 'formadmin@example.com') {
         setUser(null);
-        setSession(null);
+        localStorage.removeItem('payform_user');
         return;
       }
 
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
-      
+      // For real users
+      await supabase.auth.signOut();
       setUser(null);
-      setSession(null);
+      localStorage.removeItem('payform_user');
     } catch (error) {
       console.error('Sign out error:', error);
     }
@@ -234,14 +160,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const resetPassword = async (email: string) => {
     try {
-      const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`
-      });
-
-      if (error) throw error;
-      return { data, error: null };
+      const { data, error } = await supabase.auth.resetPasswordForEmail(email);
+      return { data, error };
     } catch (error) {
-      console.error('Password reset error:', error);
       return { data: null, error };
     }
   };
@@ -257,18 +178,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (error) throw error;
 
-      // Reload user profile
-      await loadUserProfile(user);
+      // Update local user state
+      const updatedUser = {
+        ...user,
+        profile: { ...user.profile, ...updates }
+      };
+      setUser(updatedUser);
+      localStorage.setItem('payform_user', JSON.stringify(updatedUser));
+
       return { error: null };
     } catch (error) {
-      console.error('Profile update error:', error);
       return { error };
     }
   };
 
   const value: AuthContextType = {
     user,
-    session,
     loading,
     signUp,
     signIn,
