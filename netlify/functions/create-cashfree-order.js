@@ -15,39 +15,66 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    const { form_id, email, product_name, product_price, customer_name } = JSON.parse(event.body);
+    console.log('🚀 Creating Cashfree order...');
+    console.log('Request body:', event.body);
+
+    const { 
+      form_id, 
+      email, 
+      product_name, 
+      product_price, 
+      customer_name = "Customer",
+      customer_phone = "9999999999"
+    } = JSON.parse(event.body);
 
     // Validate required fields
     if (!form_id || !email || !product_name || !product_price) {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: 'Missing required fields' })
+        body: JSON.stringify({ 
+          success: false,
+          error: 'Missing required fields: form_id, email, product_name, product_price' 
+        })
       };
     }
 
     // Environment variables
-    const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID; // Get from Cashfree dashboard
+    const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
     const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
     const SUPABASE_URL = process.env.SUPABASE_URL;
     const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!CASHFREE_APP_ID || !CASHFREE_SECRET_KEY) {
+      console.error('❌ Cashfree credentials not configured');
       return {
         statusCode: 500,
         headers,
-        body: JSON.stringify({ error: 'Cashfree credentials not configured' })
+        body: JSON.stringify({ 
+          success: false,
+          error: 'Cashfree credentials not configured' 
+        })
       };
     }
 
     // Generate unique order ID
     const orderId = `payform_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const totalAmount = parseFloat(product_price);
 
     // Calculate commission split
-    const totalAmount = parseFloat(product_price);
-    const gatewayFee = (totalAmount * 0.025) + 3; // Cashfree: 2.5% + ₹3
-    const platformCommission = totalAmount * 0.03; // Your 3%
+    const gatewayFee = (totalAmount * 2.5 / 100) + 3; // Cashfree: 2.5% + ₹3
+    const platformCommission = totalAmount * 3 / 100; // Your 3%
     const formAdminAmount = totalAmount - gatewayFee - platformCommission;
+
+    console.log('💰 Commission breakdown:', {
+      totalAmount,
+      gatewayFee: gatewayFee.toFixed(2),
+      platformCommission: platformCommission.toFixed(2),
+      formAdminAmount: formAdminAmount.toFixed(2)
+    });
+
+    // Prepare return URL with proper parameters
+    const returnUrl = `${process.env.URL || 'https://payform2025.netlify.app'}/.netlify/functions/verify-cashfree-payment?order_id=${orderId}&form_id=${form_id}&email=${encodeURIComponent(email)}`;
 
     // Create Cashfree order
     const cashfreeOrderData = {
@@ -58,16 +85,16 @@ exports.handler = async (event, context) => {
         customer_id: email.replace('@', '_').replace('.', '_'),
         customer_name: customer_name || "Customer",
         customer_email: email,
-        customer_phone: "9999999999" // You might want to collect this
+        customer_phone: customer_phone
       },
       order_meta: {
-        return_url: `${process.env.URL}/.netlify/functions/verify-cashfree-payment?order_id=${orderId}&form_id=${form_id}&email=${email}`,
-        notify_url: `${process.env.URL}/.netlify/functions/cashfree-webhook`
+        return_url: returnUrl,
+        notify_url: `${process.env.URL || 'https://payform2025.netlify.app'}/.netlify/functions/cashfree-webhook`
       },
       order_note: `Payment for ${product_name} via PayForm`
     };
 
-    console.log('Creating Cashfree order:', cashfreeOrderData);
+    console.log('📝 Cashfree order data:', cashfreeOrderData);
 
     // Call Cashfree API
     const cashfreeResponse = await fetch('https://sandbox-api.cashfree.com/pg/orders', {
@@ -83,11 +110,12 @@ exports.handler = async (event, context) => {
 
     if (!cashfreeResponse.ok) {
       const errorText = await cashfreeResponse.text();
-      console.error('Cashfree API error:', cashfreeResponse.status, errorText);
+      console.error('❌ Cashfree API error:', cashfreeResponse.status, errorText);
       return {
         statusCode: 500,
         headers,
         body: JSON.stringify({ 
+          success: false,
           error: 'Failed to create Cashfree order',
           details: errorText
         })
@@ -95,36 +123,46 @@ exports.handler = async (event, context) => {
     }
 
     const cashfreeOrder = await cashfreeResponse.json();
-    console.log('Cashfree order created:', cashfreeOrder);
+    console.log('✅ Cashfree order created:', cashfreeOrder);
 
     // Save transaction to database
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-    
-    const transactionData = {
-      form_id: form_id,
-      email: email,
-      customer_name: customer_name || "Customer",
-      product_name: product_name,
-      payment_amount: totalAmount,
-      payment_currency: 'INR',
-      payment_status: 'pending',
-      payment_provider: 'cashfree',
-      transaction_id: orderId,
-      cashfree_order_id: cashfreeOrder.cf_order_id,
-      cashfree_payment_session_id: cashfreeOrder.payment_session_id,
-      gateway_fee: Number(gatewayFee.toFixed(2)),
-      platform_commission: Number(platformCommission.toFixed(2)),
-      net_amount_to_admin: Number(formAdminAmount.toFixed(2)),
-      created_at: new Date().toISOString()
-    };
+    if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+      try {
+        const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+        
+        const transactionData = {
+          form_id: form_id,
+          email: email,
+          customer_name: customer_name,
+          product_name: product_name,
+          payment_amount: totalAmount,
+          payment_currency: 'INR',
+          payment_status: 'pending',
+          payment_provider: 'cashfree',
+          transaction_id: orderId,
+          cashfree_order_id: cashfreeOrder.cf_order_id,
+          cashfree_payment_session_id: cashfreeOrder.payment_session_id,
+          gateway_fee: Number(gatewayFee.toFixed(2)),
+          platform_commission: Number(platformCommission.toFixed(2)),
+          net_amount_to_admin: Number(formAdminAmount.toFixed(2)),
+          admin_id: 'f807a8c3-316b-4df0-90e7-5f7796c86f71', // ✅ HARDCODED FOR NOW
+          created_at: new Date().toISOString()
+        };
 
-    const { error: dbError } = await supabase
-      .from('transactions')
-      .insert([transactionData]);
+        const { error: dbError } = await supabase
+          .from('transactions')
+          .insert([transactionData]);
 
-    if (dbError) {
-      console.error('Database error:', dbError);
-      // Continue anyway - payment creation is more important
+        if (dbError) {
+          console.error('❌ Database error:', dbError);
+          // Continue anyway - payment creation is more important
+        } else {
+          console.log('✅ Transaction saved to database');
+        }
+      } catch (dbError) {
+        console.error('❌ Database connection error:', dbError);
+        // Continue anyway
+      }
     }
 
     // Return payment session for frontend
@@ -148,11 +186,12 @@ exports.handler = async (event, context) => {
     };
 
   } catch (error) {
-    console.error('Function error:', error);
+    console.error('❌ Function error:', error);
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({ 
+        success: false,
         error: 'Internal server error',
         details: error.message
       })
