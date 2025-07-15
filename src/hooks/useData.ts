@@ -203,8 +203,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isFormAdmin: user?.email !== 'admin@payform.com',
     isSuperAdmin: user?.email === 'admin@payform.com'
   };
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
 export const useAuth = (): AuthContextType => {
