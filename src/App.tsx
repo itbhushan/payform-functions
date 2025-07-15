@@ -1,5 +1,6 @@
 // src/App.tsx - Complete PayForm with Authentication + Existing Components
 import React, { useState } from 'react';
+import type { ReactNode } from 'react';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { RegisterPage } from './components/auth/RegisterPage';
 import { 
