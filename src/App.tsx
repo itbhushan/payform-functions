@@ -161,9 +161,15 @@ const LoginPage: React.FC = () => {
 const Dashboard: React.FC = () => {
   const { user, signOut, isFormAdmin, isSuperAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
+ // ADD THESE DEBUG LOGS:
+  console.log('🔍 DEBUG Dashboard - user:', user);
+  console.log('🔍 DEBUG Dashboard - user?.id:', user?.id);
+  console.log('🔍 DEBUG Dashboard - isFormAdmin:', isFormAdmin);
+  console.log('🔍 DEBUG Dashboard - isSuperAdmin:', isSuperAdmin);
   
   // Use real data hooks based on user role
   const adminId = isFormAdmin ? user?.id : undefined;
+  console.log('🔍 DEBUG Dashboard - adminId passed to hooks:', adminId);
   const { data: dashboardData, transactions, loading: dashboardLoading, error: dashboardError, refetch } = useDashboardData(adminId);
   const { admin, loading: adminLoading } = useFormAdmin(adminId);
   const { data: platformData, loading: platformLoading, error: platformError } = usePlatformData();
