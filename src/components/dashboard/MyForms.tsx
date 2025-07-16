@@ -650,7 +650,7 @@ const EditFormModal: React.FC<{
               {loading ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   );
