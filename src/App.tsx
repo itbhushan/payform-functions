@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import type { ReactNode } from 'react';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { RegisterPage } from './components/auth/RegisterPage';
+import DebugDashboard from './components/DebugDashboard';
 import { 
   useDashboardData, 
   useFormAdmin, 
@@ -266,15 +267,8 @@ const Dashboard: React.FC = () => {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
         {/* Form Admin Views */}
-        {isFormAdmin && activeTab === 'dashboard' && (
-          <DashboardContent 
-            stats={dashboardData} 
-            transactions={transactions}
-            loading={dashboardLoading}
-            error={dashboardError}
-            onRefresh={refetch}
-          />
-        )}
+        {/* DEBUG MODE - Replace this section with normal dashboard later */}
+        {isFormAdmin && activeTab === 'dashboard' && <DebugDashboard />}
         {isFormAdmin && activeTab === 'setup' && (
           <CashfreeSetup 
             config={cashfreeConfig}
@@ -299,7 +293,7 @@ const Dashboard: React.FC = () => {
         )}
         {isSuperAdmin && activeTab === 'admins' && <AdminManagement />}
       </main>
-    </div>
+      </div>
   );
 };
 
