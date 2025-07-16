@@ -1,6 +1,7 @@
 // src/App.tsx - Complete PayForm with Authentication + Existing Components
 import React, { useState } from 'react';
 import type { ReactNode } from 'react';
+import { MyForms } from './components/dashboard/MyForms';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { RegisterPage } from './components/auth/RegisterPage';
 //import DebugDashboard from './components/DebugDashboard';
@@ -285,13 +286,9 @@ const Dashboard: React.FC = () => {
             onSave={saveConfig}
           />
         )}
-        {isFormAdmin && activeTab === 'forms' && (
-          <FormsManagement 
-            forms={forms}
-            loading={formsLoading}
-          />
-        )}
-
+      {isFormAdmin && activeTab === 'forms' && (
+        <MyForms />
+      )}
         {/* Super Admin Views */}
         {isSuperAdmin && activeTab === 'overview' && (
           <PlatformOverview 
@@ -711,173 +708,13 @@ const CashfreeSetup: React.FC<{
   );
 };
 
-// Forms Management Component with Real Data
+// Forms Management Component - Now using MyForms
 const FormsManagement: React.FC<{ 
   forms: any[];
   loading: boolean;
 }> = ({ forms, loading }) => {
-  const [showAddForm, setShowAddForm] = useState(false);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading your forms...</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-lg font-medium text-gray-900">Connected Forms</h2>
-          <p className="text-sm text-gray-600">Manage your Google Forms with payment integration</p>
-        </div>
-        <button 
-          onClick={() => setShowAddForm(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm"
-        >
-          + Connect New Form
-        </button>
-      </div>
-
-      {/* Forms Grid */}
-      {forms.length > 0 ? (
-        <div className="grid gap-6">
-          {forms.map((form) => (
-            <div key={form.id} className="bg-white shadow rounded-lg border">
-              <div className="p-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-3">
-                      <h3 className="text-lg font-medium text-gray-900">{form.form_name}</h3>
-                      <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                        form.is_active 
-                          ? 'bg-green-100 text-green-800' 
-                          : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        {form.is_active ? 'Active' : 'Paused'}
-                      </span>
-                    </div>
-                    <p className="text-sm text-gray-500 mt-1">Form ID: {form.form_id}</p>
-                    <p className="text-sm text-blue-600 mt-1 truncate">{form.form_url}</p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      Created: {new Date(form.created_at).toLocaleDateString('en-IN')}
-                    </p>
-                  </div>
-                  
-                  <div className="flex flex-col space-y-2">
-                    <button className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded text-sm">
-                      View Analytics
-                    </button>
-                    <button className="bg-blue-50 hover:bg-blue-100 text-blue-600 px-3 py-1 rounded text-sm">
-                      Configure
-                    </button>
-                    <button className={`px-3 py-1 rounded text-sm ${
-                      form.is_active 
-                        ? 'bg-yellow-50 hover:bg-yellow-100 text-yellow-600' 
-                        : 'bg-green-50 hover:bg-green-100 text-green-600'
-                    }`}>
-                      {form.is_active ? 'Pause' : 'Activate'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="text-center py-12">
-          <div className="text-6xl mb-4">📝</div>
-          <h3 className="text-xl font-medium text-gray-900 mb-2">No Forms Connected Yet</h3>
-          <p className="text-gray-600 mb-6">
-            Connect your first Google Form to start accepting payments
-          </p>
-          <button 
-            onClick={() => setShowAddForm(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium"
-          >
-            + Connect Your First Form
-          </button>
-        </div>
-      )}
-
-      {/* Add Form Modal */}
-      {showAddForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-md w-full p-6">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Connect New Google Form</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Form Name
-                </label>
-                <input
-                  type="text"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="e.g., Course Registration Form"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Google Form URL
-                </label>
-                <input
-                  type="url"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="https://docs.google.com/forms/d/..."
-                />
-              </div>
-            </div>
-            <div className="flex justify-end space-x-3 mt-6">
-              <button 
-                onClick={() => setShowAddForm(false)}
-                className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm"
-              >
-                Cancel
-              </button>
-              <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm">
-                Connect Form
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Setup Guide */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-        <h3 className="text-lg font-medium text-blue-900 mb-4">📋 Google Form Setup Guide</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <h4 className="font-medium text-blue-800 mb-2">1. Required Form Fields</h4>
-            <ul className="text-sm text-blue-700 space-y-1 list-disc list-inside">
-              <li>Email (required for payment links)</li>
-              <li>Product with pricing (e.g., "Course - ₹2999")</li>
-              <li>Payment Method selection</li>
-              <li>Customer name (recommended)</li>
-            </ul>
-          </div>
-          <div>
-            <h4 className="font-medium text-blue-800 mb-2">2. Integration Steps</h4>
-            <ul className="text-sm text-blue-700 space-y-1 list-disc list-inside">
-              <li>Copy your form ID from the URL</li>
-              <li>Install PayForm Apps Script code</li>
-              <li>Configure form submit trigger</li>
-              <li>Test with sample submission</li>
-            </ul>
-          </div>
-        </div>
-        <div className="mt-4">
-          <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm">
-            📖 View Complete Setup Guide
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+  // This component is now replaced by the new MyForms component
+  return <MyForms />;
 };
 
 // Platform Overview Component with Real Data
