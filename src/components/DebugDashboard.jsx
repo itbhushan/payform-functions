@@ -1,11 +1,37 @@
-// Debug version of your dashboard - Add this to see what's happening
+// src/components/DebugDashboard.tsx
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase'; // Adjust path as needed
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../hooks/useAuth';
 
-const DebugDashboard = () => {
-  const [debugInfo, setDebugInfo] = useState({});
+interface DebugInfo {
+  session?: any;
+  sessionError?: any;
+  user?: any;
+  dbConnection?: string;
+  dbError?: any;
+  dbConnectionError?: string;
+  adminRecord?: any;
+  adminError?: any;
+  adminQueryError?: string;
+  totalTransactions?: number;
+  transactionsError?: any;
+  transactionsQueryError?: string;
+  userTransactions?: any[];
+  userTransactionsError?: any;
+  userTransactionsQueryError?: string;
+  dashboardEndpoint?: any;
+  dashboardEndpointStatus?: number;
+  dashboardEndpointError?: string;
+  supabaseUrl?: string;
+  supabaseKey?: string;
+  generalError?: string;
+  errorDetails?: any;
+}
+
+const DebugDashboard: React.FC = () => {
+  const [debugInfo, setDebugInfo] = useState<DebugInfo>({});
   const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState(null);
+  const { user, signOut } = useAuth();
 
   useEffect(() => {
     debugDashboardData();
@@ -14,7 +40,7 @@ const DebugDashboard = () => {
   const debugDashboardData = async () => {
     try {
       setLoading(true);
-      const debug = {};
+      const debug: DebugInfo = {};
 
       // 1. Check authentication state
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
@@ -30,7 +56,7 @@ const DebugDashboard = () => {
           .limit(1);
         debug.dbConnection = testData ? 'Connected' : 'Failed';
         debug.dbError = testError;
-      } catch (err) {
+      } catch (err: any) {
         debug.dbConnection = 'Failed';
         debug.dbConnectionError = err.message;
       }
@@ -46,7 +72,7 @@ const DebugDashboard = () => {
           
           debug.adminRecord = adminData;
           debug.adminError = adminError;
-        } catch (err) {
+        } catch (err: any) {
           debug.adminQueryError = err.message;
         }
       }
@@ -59,7 +85,7 @@ const DebugDashboard = () => {
         
         debug.totalTransactions = transactionsData?.length || 0;
         debug.transactionsError = transactionsError;
-      } catch (err) {
+      } catch (err: any) {
         debug.transactionsQueryError = err.message;
       }
 
@@ -74,7 +100,7 @@ const DebugDashboard = () => {
           
           debug.userTransactions = userTransactions;
           debug.userTransactionsError = userTransError;
-        } catch (err) {
+        } catch (err: any) {
           debug.userTransactionsQueryError = err.message;
         }
       }
@@ -85,7 +111,7 @@ const DebugDashboard = () => {
         const dashboardData = await response.json();
         debug.dashboardEndpoint = dashboardData;
         debug.dashboardEndpointStatus = response.status;
-      } catch (err) {
+      } catch (err: any) {
         debug.dashboardEndpointError = err.message;
       }
 
@@ -94,9 +120,8 @@ const DebugDashboard = () => {
       debug.supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY ? 'Present' : 'Missing';
 
       setDebugInfo(debug);
-      setUser(session?.user);
 
-    } catch (error) {
+    } catch (error: any) {
       setDebugInfo({ 
         generalError: error.message,
         errorDetails: error
@@ -184,7 +209,7 @@ const DebugDashboard = () => {
               <div>
                 <p><strong>Total Transactions:</strong> {debugInfo.totalTransactions || 0}</p>
                 <p><strong>User Transactions:</strong> {debugInfo.userTransactions?.length || 0}</p>
-                {debugInfo.userTransactions?.length > 0 && (
+                {debugInfo.userTransactions && debugInfo.userTransactions.length > 0 && (
                   <p><strong>Latest Transaction:</strong> {debugInfo.userTransactions[0].product_name}</p>
                 )}
               </div>
@@ -236,7 +261,7 @@ const DebugDashboard = () => {
             </button>
 
             <button
-              onClick={() => supabase.auth.signOut()}
+              onClick={signOut}
               className="bg-red-600 text-white px-6 py-2 rounded-lg hover:bg-red-700"
             >
               🚪 Sign Out
