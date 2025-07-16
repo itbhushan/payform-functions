@@ -101,11 +101,7 @@ export const useDashboardData = (adminId?: string) => {
 
       const allTransactions = transactionsData || [];
       setTransactions(allTransactions);
-
-       // ADD THESE DEBUG LOGS:
-      console.log('🔍 DEBUG: allTransactions:', allTransactions);
-      console.log('🔍 DEBUG: allTransactions.length:', allTransactions.length);
-      
+  
       // Calculate stats
       const totalSales = allTransactions.reduce((sum, t) => sum + (t.payment_amount || 0), 0);
       const completedTransactions = allTransactions.filter(t => t.payment_status === 'paid').length;
@@ -130,7 +126,6 @@ export const useDashboardData = (adminId?: string) => {
       };
 
       setData(stats);
-      console.log('🔍 DEBUG: setData called with:', stats);
       
     } catch (err: any) {
       console.error('Error fetching dashboard data:', err);
