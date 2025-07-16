@@ -1,5 +1,5 @@
-// src/components/dashboard/MyForms.tsx
-import React, { useState, useEffect } from 'react';
+// src/components/dashboard/MyForms.tsx - FIXED VERSION
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
 
@@ -9,13 +9,6 @@ interface FormConfig {
   form_name: string;
   form_url: string;
   is_active: boolean;
-  payment_settings: {
-    products: Array<{
-      name: string;
-      price: number;
-    }>;
-    currency: string;
-  };
   created_at: string;
   stats?: {
     total_transactions: number;
@@ -25,20 +18,19 @@ interface FormConfig {
   };
 }
 
-export const MyForms: React.FC = () => {
+// ✅ FIX 1: Memoized component to prevent unnecessary re-renders
+export const MyForms: React.FC = React.memo(() => {
   const { user } = useAuth();
   const [forms, setForms] = useState<FormConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [showSetupGuide, setShowSetupGuide] = useState(false);
+  const [editingForm, setEditingForm] = useState<FormConfig | null>(null);
 
-  useEffect(() => {
-    if (user) {
-      loadUserForms();
-    }
-  }, [user]);
-
-  const loadUserForms = async () => {
+  // ✅ FIX 1: Memoized callback to prevent re-creation on every render
+  const loadUserForms = useCallback(async () => {
+    if (!user?.id) return;
+    
     try {
       setLoading(true);
       
@@ -51,10 +43,9 @@ export const MyForms: React.FC = () => {
           form_name,
           form_url,
           is_active,
-          payment_settings,
           created_at
         `)
-        .eq('admin_id', user?.id)
+        .eq('admin_id', user.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -67,7 +58,7 @@ export const MyForms: React.FC = () => {
               .from('transactions')
               .select('payment_status, payment_amount')
               .eq('form_id', form.form_id)
-              .eq('admin_id', user?.id);
+              .eq('admin_id', user.id);
 
             const totalTransactions = transactions?.length || 0;
             const successfulTransactions = transactions?.filter(t => t.payment_status === 'paid').length || 0;
@@ -94,7 +85,15 @@ export const MyForms: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.id]);
+
+  // ✅ FIX 1: Only load once when component mounts or user changes
+  useEffect(() => {
+    loadUserForms();
+  }, [loadUserForms]);
+
+  // ✅ FIX 1: Memoize forms count to prevent unnecessary re-renders in parent
+  const formsCount = useMemo(() => forms.length, [forms.length]);
 
   if (loading) {
     return (
@@ -141,7 +140,11 @@ export const MyForms: React.FC = () => {
           {forms.length === 0 ? (
             <EmptyState onConnectForm={() => setShowAddForm(true)} onShowGuide={() => setShowSetupGuide(true)} />
           ) : (
-            <FormsGrid forms={forms} onRefresh={loadUserForms} />
+            <FormsGrid 
+              forms={forms} 
+              onRefresh={loadUserForms}
+              onEdit={setEditingForm}
+            />
           )}
         </div>
       </div>
@@ -157,13 +160,25 @@ export const MyForms: React.FC = () => {
         />
       )}
 
+      {/* ✅ FIX 2: Edit Form Modal */}
+      {editingForm && (
+        <EditFormModal
+          form={editingForm}
+          onClose={() => setEditingForm(null)}
+          onSuccess={() => {
+            setEditingForm(null);
+            loadUserForms();
+          }}
+        />
+      )}
+
       {/* Setup Guide Modal */}
       {showSetupGuide && (
         <SetupGuideModal onClose={() => setShowSetupGuide(false)} />
       )}
     </div>
   );
-};
+});
 
 // Empty State Component
 const EmptyState: React.FC<{ onConnectForm: () => void; onShowGuide: () => void }> = ({ onConnectForm, onShowGuide }) => (
@@ -187,50 +202,60 @@ const EmptyState: React.FC<{ onConnectForm: () => void; onShowGuide: () => void 
       </button>
     </div>
 
-    {/* Quick Setup Guide Preview */}
+    {/* Updated Quick Setup Guide */}
     <div className="mt-12 bg-blue-50 border border-blue-200 rounded-lg p-6 text-left max-w-2xl mx-auto">
       <h4 className="font-medium text-blue-900 mb-4">📋 Google Form Setup Guide</h4>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm text-blue-800">
         <div>
           <h5 className="font-medium mb-2">1. Required Form Fields</h5>
           <ul className="space-y-1 text-xs">
-            <li>• Email (required for payment links)</li>
-            <li>• Product with pricing (e.g., "Course - ₹2999")</li>
-            <li>• Customer name (recommended)</li>
-            <li>• Phone number (optional)</li>
+            <li>• <strong>Email</strong> (required for payment links)</li>
+            <li>• <strong>Product</strong> format: "Course - ₹2999"</li>
+            <li>• <strong>Customer Name</strong> (recommended)</li>
+            <li>• <strong>Phone Number</strong> (optional)</li>
           </ul>
         </div>
         <div>
           <h5 className="font-medium mb-2">2. Integration Steps</h5>
           <ul className="space-y-1 text-xs">
-            <li>• Copy your form ID from the URL</li>
-            <li>• Install PayForm Apps Script code</li>
-            <li>• Configure form submit trigger</li>
-            <li>• Test with sample submission</li>
+            <li>• Copy form ID from URL</li>
+            <li>• Install PayForm Apps Script</li>
+            <li>• Configure submit trigger</li>
+            <li>• Test with submission</li>
           </ul>
         </div>
       </div>
-      <button 
-        onClick={onShowGuide}
-        className="mt-4 bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700"
-      >
-        📖 View Complete Setup Guide
-      </button>
+      <div className="mt-4 p-3 bg-blue-100 rounded-lg text-xs text-blue-700">
+        <p><strong>💡 Note:</strong> Product pricing is extracted from your form responses automatically. No need to configure products separately in PayForm!</p>
+      </div>
     </div>
   </div>
 );
 
-// Forms Grid Component
-const FormsGrid: React.FC<{ forms: FormConfig[]; onRefresh: () => void }> = ({ forms, onRefresh }) => (
+// ✅ FIX 2: Enhanced Forms Grid with Edit functionality
+const FormsGrid: React.FC<{ 
+  forms: FormConfig[]; 
+  onRefresh: () => void;
+  onEdit: (form: FormConfig) => void;
+}> = ({ forms, onRefresh, onEdit }) => (
   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
     {forms.map((form) => (
-      <FormCard key={form.id} form={form} onRefresh={onRefresh} />
+      <FormCard 
+        key={form.id} 
+        form={form} 
+        onRefresh={onRefresh}
+        onEdit={onEdit}
+      />
     ))}
   </div>
 );
 
-// Individual Form Card Component
-const FormCard: React.FC<{ form: FormConfig; onRefresh: () => void }> = ({ form, onRefresh }) => {
+// ✅ FIX 2: Enhanced Form Card with Edit button and better stats display
+const FormCard: React.FC<{ 
+  form: FormConfig; 
+  onRefresh: () => void;
+  onEdit: (form: FormConfig) => void;
+}> = ({ form, onRefresh, onEdit }) => {
   const [showDetails, setShowDetails] = useState(false);
 
   const toggleFormStatus = async () => {
@@ -268,7 +293,7 @@ const FormCard: React.FC<{ form: FormConfig; onRefresh: () => void }> = ({ form,
           </div>
         </div>
 
-        {/* Stats Grid */}
+        {/* ✅ FIX 2: Enhanced Stats Display with explanation for new forms */}
         {form.stats && (
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div className="text-center">
@@ -284,38 +309,40 @@ const FormCard: React.FC<{ form: FormConfig; onRefresh: () => void }> = ({ form,
               <div className="text-xs text-gray-500">Paid</div>
             </div>
             <div className="text-center">
-              <div className="text-lg font-bold text-orange-600">{form.stats.conversion_rate.toFixed(1)}%</div>
+              <div className="text-lg font-bold text-orange-600">
+                {form.stats.total_transactions > 0 ? `${form.stats.conversion_rate.toFixed(1)}%` : '—'}
+              </div>
               <div className="text-xs text-gray-500">Conversion</div>
             </div>
           </div>
         )}
 
-        {/* Products */}
-        <div className="mb-4">
-          <h4 className="text-sm font-medium text-gray-700 mb-2">Products:</h4>
-          <div className="space-y-1">
-            {form.payment_settings?.products?.map((product, index) => (
-              <div key={index} className="flex justify-between text-sm">
-                <span className="text-gray-600">{product.name}</span>
-                <span className="font-medium">₹{product.price}</span>
-              </div>
-            )) || (
-              <p className="text-sm text-gray-500 italic">No products configured</p>
-            )}
+        {/* ✅ FIX 2: New forms message */}
+        {form.stats && form.stats.total_transactions === 0 && (
+          <div className="mb-4 p-3 bg-blue-50 rounded-lg text-xs text-blue-700">
+            <p><strong>📊 New Form:</strong> Stats will appear here as customers submit payments through this form.</p>
           </div>
-        </div>
+        )}
 
-        {/* Actions */}
-        <div className="flex space-x-2">
+        {/* ✅ FIX 3: Removed Products section - products come from form responses */}
+
+        {/* ✅ FIX 2: Enhanced Actions with Edit button */}
+        <div className="grid grid-cols-3 gap-2 mb-3">
           <button
             onClick={() => setShowDetails(true)}
-            className="flex-1 bg-blue-50 text-blue-700 hover:bg-blue-100 px-3 py-2 rounded text-sm font-medium"
+            className="bg-blue-50 text-blue-700 hover:bg-blue-100 px-3 py-2 rounded text-sm font-medium"
           >
             📊 Details
           </button>
           <button
+            onClick={() => onEdit(form)}
+            className="bg-gray-50 text-gray-700 hover:bg-gray-100 px-3 py-2 rounded text-sm font-medium"
+          >
+            ✏️ Edit
+          </button>
+          <button
             onClick={toggleFormStatus}
-            className={`flex-1 px-3 py-2 rounded text-sm font-medium ${
+            className={`px-3 py-2 rounded text-sm font-medium ${
               form.is_active
                 ? 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100'
                 : 'bg-green-50 text-green-700 hover:bg-green-100'
@@ -326,7 +353,7 @@ const FormCard: React.FC<{ form: FormConfig; onRefresh: () => void }> = ({ form,
         </div>
 
         {/* Quick Actions */}
-        <div className="mt-3 flex justify-between text-xs">
+        <div className="flex justify-between text-xs">
           <a 
             href={form.form_url} 
             target="_blank" 
@@ -353,56 +380,47 @@ const FormCard: React.FC<{ form: FormConfig; onRefresh: () => void }> = ({ form,
   );
 };
 
-// Add Form Modal Component
+// ✅ FIX 3: Simplified Add Form Modal (no products configuration)
 const AddFormModal: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ onClose, onSuccess }) => {
   const { user } = useAuth();
   const [formData, setFormData] = useState({
     form_url: '',
-    form_name: '',
-    products: [{ name: '', price: 0 }]
+    form_name: ''
   });
   const [loading, setLoading] = useState(false);
-  const [step, setStep] = useState(1);
+  const [error, setError] = useState('');
 
   const extractFormId = (url: string) => {
     const match = url.match(/forms\/d\/([a-zA-Z0-9-_]+)/);
     return match ? match[1] : null;
   };
 
-  const addProduct = () => {
-    setFormData(prev => ({
-      ...prev,
-      products: [...prev.products, { name: '', price: 0 }]
-    }));
-  };
-
-  const removeProduct = (index: number) => {
-    setFormData(prev => ({
-      ...prev,
-      products: prev.products.filter((_, i) => i !== index)
-    }));
-  };
-
-  const updateProduct = (index: number, field: 'name' | 'price', value: string | number) => {
-    setFormData(prev => ({
-      ...prev,
-      products: prev.products.map((product, i) => 
-        i === index ? { ...product, [field]: value } : product
-      )
-    }));
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
     
     const formId = extractFormId(formData.form_url);
     if (!formId) {
-      alert('Invalid Google Form URL. Please check the URL format.');
+      setError('Invalid Google Form URL. Please check the URL format.');
       return;
     }
 
     setLoading(true);
     try {
+      // Check if form already exists
+      const { data: existingForm } = await supabase
+        .from('form_configs')
+        .select('id')
+        .eq('form_id', formId)
+        .eq('admin_id', user?.id)
+        .single();
+
+      if (existingForm) {
+        setError('This form is already connected to your account.');
+        setLoading(false);
+        return;
+      }
+
       // Insert form config
       const { error: formError } = await supabase
         .from('form_configs')
@@ -413,22 +431,19 @@ const AddFormModal: React.FC<{ onClose: () => void; onSuccess: () => void }> = (
           form_url: formData.form_url,
           is_active: true,
           payment_settings: {
-            products: formData.products.filter(p => p.name && p.price > 0),
             currency: 'INR'
           }
         });
 
       if (formError) throw formError;
 
-      // Insert payment config for backward compatibility
+      // Insert basic payment config for backward compatibility
       const { error: paymentError } = await supabase
         .from('payment_configs')
         .insert({
           form_id: formId,
           admin_id: user?.id,
           form_name: formData.form_name,
-          products: formData.products.filter(p => p.name && p.price > 0),
-          price: formData.products[0]?.price || 0,
           currency: 'INR',
           is_active: true
         });
@@ -438,7 +453,7 @@ const AddFormModal: React.FC<{ onClose: () => void; onSuccess: () => void }> = (
       onSuccess();
     } catch (error) {
       console.error('Error saving form:', error);
-      alert('Error saving form. Please try again.');
+      setError('Error saving form. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -446,7 +461,7 @@ const AddFormModal: React.FC<{ onClose: () => void; onSuccess: () => void }> = (
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-lg font-medium text-gray-900">Connect New Google Form</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
@@ -454,8 +469,13 @@ const AddFormModal: React.FC<{ onClose: () => void; onSuccess: () => void }> = (
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Step 1: Basic Info */}
+        {error && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Google Form URL *
@@ -487,57 +507,14 @@ const AddFormModal: React.FC<{ onClose: () => void; onSuccess: () => void }> = (
             />
           </div>
 
-          {/* Products Section */}
-          <div>
-            <div className="flex justify-between items-center mb-3">
-              <label className="block text-sm font-medium text-gray-700">
-                Products/Services *
-              </label>
-              <button
-                type="button"
-                onClick={addProduct}
-                className="text-blue-600 hover:text-blue-800 text-sm"
-              >
-                + Add Product
-              </button>
-            </div>
-            
-            {formData.products.map((product, index) => (
-              <div key={index} className="flex space-x-3 mb-3">
-                <input
-                  type="text"
-                  value={product.name}
-                  onChange={(e) => updateProduct(index, 'name', e.target.value)}
-                  placeholder="Product name"
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-                  required
-                />
-                <div className="flex items-center">
-                  <span className="text-gray-500 mr-2">₹</span>
-                  <input
-                    type="number"
-                    value={product.price}
-                    onChange={(e) => updateProduct(index, 'price', parseInt(e.target.value) || 0)}
-                    placeholder="0"
-                    min="1"
-                    className="w-24 px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-                    required
-                  />
-                </div>
-                {formData.products.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => removeProduct(index)}
-                    className="text-red-600 hover:text-red-800 px-2"
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            ))}
+          {/* ✅ FIX 3: Added explanation about products */}
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-sm text-blue-800">
+              <strong>💡 Note:</strong> Product details and pricing will be automatically extracted from your form responses. 
+              Make sure your form includes a field with format like "Course - ₹2999".
+            </p>
           </div>
 
-          {/* Submit Button */}
           <div className="flex justify-end space-x-3 pt-4 border-t">
             <button
               type="button"
@@ -560,10 +537,129 @@ const AddFormModal: React.FC<{ onClose: () => void; onSuccess: () => void }> = (
   );
 };
 
-// Form Details Modal
+// ✅ FIX 2: New Edit Form Modal
+const EditFormModal: React.FC<{ 
+  form: FormConfig; 
+  onClose: () => void; 
+  onSuccess: () => void;
+}> = ({ form, onClose, onSuccess }) => {
+  const [formData, setFormData] = useState({
+    form_name: form.form_name,
+    form_url: form.form_url,
+    is_active: form.is_active
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      const { error: updateError } = await supabase
+        .from('form_configs')
+        .update({
+          form_name: formData.form_name,
+          form_url: formData.form_url,
+          is_active: formData.is_active,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', form.id);
+
+      if (updateError) throw updateError;
+
+      onSuccess();
+    } catch (error) {
+      console.error('Error updating form:', error);
+      setError('Error updating form. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 w-full max-w-md">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-lg font-medium text-gray-900">Edit Form</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <span className="text-2xl">×</span>
+          </button>
+        </div>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Form Name *
+            </label>
+            <input
+              type="text"
+              value={formData.form_name}
+              onChange={(e) => setFormData(prev => ({ ...prev, form_name: e.target.value }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Google Form URL *
+            </label>
+            <input
+              type="url"
+              value={formData.form_url}
+              onChange={(e) => setFormData(prev => ({ ...prev, form_url: e.target.value }))}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
+          </div>
+
+          <div className="flex items-center">
+            <input
+              type="checkbox"
+              id="is_active"
+              checked={formData.is_active}
+              onChange={(e) => setFormData(prev => ({ ...prev, is_active: e.target.checked }))}
+              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+            />
+            <label htmlFor="is_active" className="ml-2 text-sm text-gray-700">
+              Form is active
+            </label>
+          </div>
+
+          <div className="flex justify-end space-x-3 pt-4 border-t">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+            >
+              {loading ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Form Details Modal (simplified)
 const FormDetailsModal: React.FC<{ form: FormConfig; onClose: () => void; onRefresh: () => void }> = ({ form, onClose, onRefresh }) => (
   <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-    <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+    <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
       <div className="flex justify-between items-center mb-6">
         <h3 className="text-lg font-medium text-gray-900">{form.form_name} - Details</h3>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
@@ -571,18 +667,38 @@ const FormDetailsModal: React.FC<{ form: FormConfig; onClose: () => void; onRefr
         </button>
       </div>
 
-      {/* Detailed stats and management options would go here */}
-      <div className="text-center py-8">
-        <p className="text-gray-600">Detailed form analytics and management coming soon!</p>
-        <p className="text-sm text-gray-500 mt-2">
-          This will include transaction history, revenue trends, and advanced settings.
-        </p>
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-500">Form ID</label>
+            <p className="text-sm text-gray-900 font-mono">{form.form_id}</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-500">Status</label>
+            <p className="text-sm text-gray-900">{form.is_active ? 'Active' : 'Paused'}</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-500">Created</label>
+            <p className="text-sm text-gray-900">{new Date(form.created_at).toLocaleDateString()}</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-500">Total Revenue</label>
+            <p className="text-sm text-gray-900 font-bold">₹{form.stats?.total_revenue || 0}</p>
+          </div>
+        </div>
+        
+        <div>
+          <label className="block text-sm font-medium text-gray-500">Form URL</label>
+          <a href={form.form_url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:text-blue-800 break-all">
+            {form.form_url}
+          </a>
+        </div>
       </div>
     </div>
   </div>
 );
 
-// Setup Guide Modal
+// Setup Guide Modal (unchanged)
 const SetupGuideModal: React.FC<{ onClose: () => void }> = ({ onClose }) => (
   <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
     <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -594,7 +710,6 @@ const SetupGuideModal: React.FC<{ onClose: () => void }> = ({ onClose }) => (
       </div>
 
       <div className="prose prose-sm max-w-none">
-        {/* Comprehensive setup guide content would go here */}
         <div className="text-center py-8">
           <p className="text-gray-600">Complete step-by-step setup guide coming soon!</p>
           <p className="text-sm text-gray-500 mt-2">
