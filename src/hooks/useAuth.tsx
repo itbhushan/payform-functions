@@ -1,3 +1,4 @@
+// src/hooks/useAuth.tsx - Complete Fixed Version
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
@@ -10,6 +11,9 @@ interface AuthContextType {
   signUp: (email: string, password: string, userData: any) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
   profile: any;
+  isFormAdmin: boolean;
+  isSuperAdmin: boolean;
+  clearAuthData: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -33,75 +37,151 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [profile, setProfile] = useState<any>(null);
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        loadUserProfile(session.user.id);
+    let mounted = true;
+    
+    const initializeAuth = async () => {
+      try {
+        console.log('🔄 Initializing auth...');
+        
+        // Clear any stale auth state first
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (mounted) {
+          console.log('✅ Auth session:', session?.user?.email || 'No session');
+          setSession(session);
+          setUser(session?.user ?? null);
+          
+          if (session?.user) {
+            await loadUserProfile(session.user.id);
+          }
+          
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error('❌ Auth initialization error:', error);
+        if (mounted) {
+          // Clear auth state on error
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+          setLoading(false);
+        }
       }
-      setLoading(false);
-    });
+    };
+
+    // Initialize auth
+    initializeAuth();
 
     // Listen for auth changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        await loadUserProfile(session.user.id);
-      } else {
-        setProfile(null);
+      if (!mounted) return;
+      
+      console.log('🔄 Auth state changed:', event, session?.user?.email || 'No user');
+      
+      try {
+        // Handle different auth events
+        if (event === 'SIGNED_OUT') {
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+        } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          setSession(session);
+          setUser(session?.user ?? null);
+          
+          if (session?.user) {
+            await loadUserProfile(session.user.id);
+          } else {
+            setProfile(null);
+          }
+        } else if (event === 'USER_UPDATED') {
+          setSession(session);
+          setUser(session?.user ?? null);
+        }
+        
+        setLoading(false);
+      } catch (error) {
+        console.error('❌ Auth state change error:', error);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    // Fallback timeout to prevent infinite loading
+    const fallbackTimeout = setTimeout(() => {
+      if (mounted && loading) {
+        console.warn('⚠️ Auth loading timeout - stopping loading state');
+        setLoading(false);
+      }
+    }, 10000); // 10 second timeout
+
+    return () => {
+      mounted = false;
+      clearTimeout(fallbackTimeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const loadUserProfile = async (userId: string) => {
     try {
-      const { data, error } = await supabase
+      console.log('📝 Loading user profile for:', userId);
+      
+      // Add timeout to prevent hanging
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Profile load timeout')), 8000)
+      );
+      
+      const profilePromise = supabase
         .from('form_admins')
         .select('*')
         .eq('id', userId)
         .single();
 
+      const { data, error } = await Promise.race([profilePromise, timeoutPromise]) as any;
+
       if (error && error.code !== 'PGRST116') {
-        console.error('Error loading profile:', error);
+        console.error('❌ Error loading profile:', error);
         return;
       }
 
+      console.log('✅ Profile loaded:', data?.email || 'No profile');
       setProfile(data);
     } catch (error) {
-      console.error('Error loading profile:', error);
+      console.error('❌ Profile load error or timeout:', error);
+      // Don't block auth flow if profile fails
+      setProfile(null);
     }
   };
 
   const signIn = async (email: string, password: string) => {
     try {
       setLoading(true);
+      console.log('🔑 Signing in:', email);
+      
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
       if (error) {
+        console.error('❌ Sign in error:', error);
         return { error };
       }
 
+      console.log('✅ Sign in successful:', email);
       return { error: null };
     } catch (error) {
+      console.error('❌ Sign in exception:', error);
       return { error };
     } finally {
-      setLoading(false);
+      // Don't set loading false here - let auth state change handle it
     }
   };
 
   const signUp = async (email: string, password: string, userData: any) => {
     try {
       setLoading(true);
+      console.log('📝 Signing up:', email);
       
       // First, sign up the user
       const { data, error } = await supabase.auth.signUp({
@@ -116,11 +196,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
       });
 
       if (error) {
+        console.error('❌ Sign up error:', error);
         return { error };
       }
 
       // If user was created, create profile
       if (data.user) {
+        console.log('👤 Creating user profile...');
         const { error: profileError } = await supabase
           .from('form_admins')
           .insert([
@@ -135,13 +217,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
           ]);
 
         if (profileError) {
-          console.error('Error creating profile:', profileError);
+          console.error('❌ Error creating profile:', profileError);
           // Don't return error here as auth was successful
+        } else {
+          console.log('✅ Profile created successfully');
         }
       }
 
       return { error: null };
     } catch (error) {
+      console.error('❌ Sign up exception:', error);
       return { error };
     } finally {
       setLoading(false);
@@ -149,11 +234,54 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   const signOut = async () => {
-    setLoading(true);
-    await supabase.auth.signOut();
-    setProfile(null);
-    setLoading(false);
+    try {
+      console.log('🚪 Signing out...');
+      setLoading(true);
+      
+      await supabase.auth.signOut();
+      setProfile(null);
+      
+      console.log('✅ Signed out successfully');
+    } catch (error) {
+      console.error('❌ Sign out error:', error);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const clearAuthData = async () => {
+    try {
+      console.log('🧹 Clearing all auth data...');
+      
+      await supabase.auth.signOut();
+      setSession(null);
+      setUser(null);
+      setProfile(null);
+      
+      // Clear browser storage
+      try {
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch (e) {
+        console.warn('Could not clear storage:', e);
+      }
+      
+      console.log('✅ Auth data cleared');
+      
+      // Reload page to ensure clean state
+      setTimeout(() => {
+        window.location.reload();
+      }, 100);
+    } catch (error) {
+      console.error('❌ Error clearing auth data:', error);
+      // Force reload anyway
+      window.location.reload();
+    }
+  };
+
+  // Calculate user roles
+  const isFormAdmin = user?.email !== 'admin@payform.com';
+  const isSuperAdmin = user?.email === 'admin@payform.com';
 
   const value: AuthContextType = {
     user,
@@ -163,6 +291,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     signUp,
     signOut,
     profile,
+    isFormAdmin,
+    isSuperAdmin,
+    clearAuthData,
   };
 
   return (
