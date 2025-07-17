@@ -1,6 +1,42 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
+// Add these missing functions before the useDashboardData hook:
+export const fetchAdmin = async (userId: string) => {
+  try {
+    const { data, error } = await supabase
+      .from('form_admins')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+
+    return data;
+  } catch (err) {
+    console.error('fetchAdmin error:', err);
+    throw err;
+  }
+};
+
+export const createAdmin = async (adminData: any) => {
+  try {
+    const { data, error } = await supabase
+      .from('form_admins')
+      .insert([adminData])
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    console.error('createAdmin error:', err);
+    throw err;
+  }
+};
+
 // Type definitions
 export interface Transaction {
   id: number;
@@ -185,42 +221,6 @@ const { data: transactionsData, error: transactionsError } = await supabase
       setLoading(false);
     }
   };
-
-// Add these missing functions before the useDashboardData hook:
-export const fetchAdmin = async (userId: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('form_admins')
-      .select('*')
-      .eq('id', userId)
-      .single();
-
-    if (error && error.code !== 'PGRST116') {
-      throw error;
-    }
-
-    return data;
-  } catch (err) {
-    console.error('fetchAdmin error:', err);
-    throw err;
-  }
-};
-
-export const createAdmin = async (adminData: any) => {
-  try {
-    const { data, error } = await supabase
-      .from('form_admins')
-      .insert([adminData])
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data;
-  } catch (err) {
-    console.error('createAdmin error:', err);
-    throw err;
-  }
-};
 
 // Fix the useEffect in useDashboardData:
 useEffect(() => {
