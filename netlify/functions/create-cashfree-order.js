@@ -93,7 +93,12 @@ exports.handler = async (event, context) => {
 
     const cashfreeOrder = await cashfreeResponse.json();
     console.log('✅ Cashfree order created:', cashfreeOrder);
-
+    // Log specific fields we need
+    console.log('🔍 Available fields:', Object.keys(cashfreeOrder));
+    console.log('🔍 cf_order_id:', cashfreeOrder.cf_order_id);
+    console.log('🔍 payment_session_id:', cashfreeOrder.payment_session_id);
+    console.log('🔍 order_token:', cashfreeOrder.order_token);
+    
     return {
       statusCode: 200,
       headers,
