@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { fetchAdmin, createAdmin } from './useData'; // ✅ Add this import
 
 interface AuthContextType {
   user: User | null;
@@ -134,14 +135,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setTimeout(() => reject(new Error('Profile load timeout')), 8000)
       );
       
-  const { data, error } = await Promise.race([
-    supabase
-      .from('form_admins')
-      .select('*')
-      .eq('id', userId)
-      .single(),
-    timeoutPromise
-  ]) as any;
+const data = await Promise.race([
+  fetchAdmin(userId), // ✅ Use the imported function
+  timeoutPromise
+]) as any;
       
       if (error && error.code !== 'PGRST116') {
         console.error('❌ Error loading profile:', error);
@@ -207,19 +204,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // If user was created, create profile
       if (data.user) {
         console.log('👤 Creating user profile...');
-        const { error: profileError } = await supabase
-          .from('form_admins')
-          .insert([
-            {
-              id: data.user.id,
-              email: email,
-              name: userData.name,
-              company_name: userData.company_name || null,
-              created_at: new Date().toISOString(),
-              is_active: true
-            }
-          ]);
-
+        
+// Use the imported createAdmin function:
+try {
+  await createAdmin({
+    id: data.user.id,
+    email: email,
+    name: userData.name,
+    company_name: userData.company_name || null,
+    is_active: true
+  });
+  console.log('✅ Profile created successfully');
+} catch (profileError) {
+  console.error('❌ Error creating profile:', profileError);
+}
+        
         if (profileError) {
           console.error('❌ Error creating profile:', profileError);
           // Don't return error here as auth was successful
