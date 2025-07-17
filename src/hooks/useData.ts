@@ -96,7 +96,8 @@ const { data: transactionsData, error: transactionsError } = await supabase
   .select('*')
   .eq('admin_id', adminId)
   .order('created_at', { ascending: false })
-  .abortSignal(newController.signal);
+  // Remove the abortSignal line completely
+  .order('created_at', { ascending: false });
     
       if (transactionsError) {
         throw transactionsError;
@@ -185,10 +186,47 @@ const { data: transactionsData, error: transactionsError } = await supabase
     }
   };
 
+// Add these missing functions before the useDashboardData hook:
+export const fetchAdmin = async (userId: string) => {
+  try {
+    const { data, error } = await supabase
+      .from('form_admins')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+
+    return data;
+  } catch (err) {
+    console.error('fetchAdmin error:', err);
+    throw err;
+  }
+};
+
+export const createAdmin = async (adminData: any) => {
+  try {
+    const { data, error } = await supabase
+      .from('form_admins')
+      .insert([adminData])
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    console.error('createAdmin error:', err);
+    throw err;
+  }
+};
+
+// Fix the useEffect in useDashboardData:
 useEffect(() => {
   const timeoutId = setTimeout(() => {
-    fetchAdmin();
-  }, 300); // 300ms debounce
+    fetchData(); // ✅ Call fetchData instead of fetchAdmin
+  }, 300);
 
   return () => clearTimeout(timeoutId);
 }, [adminId]);
