@@ -71,6 +71,8 @@ export interface FormConfig {
   created_at: string;
 }
 
+// Add this state at the top of useDashboardData hook
+const [abortController, setAbortController] = useState<AbortController | null>(null);
 // Dashboard Data Hook
 export const useDashboardData = (adminId?: string) => {
   const [data, setData] = useState<DashboardStats | null>(null);
@@ -78,23 +80,33 @@ export const useDashboardData = (adminId?: string) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchData = async () => {
-    if (!adminId) {
-      setLoading(false);
-      return;
-    }
+const fetchData = async () => {
+  if (!adminId) {
+    setLoading(false);
+    return;
+  }
 
-    try {
-      setLoading(true);
-      setError(null);
+  // Cancel previous request
+  if (abortController) {
+    abortController.abort();
+  }
 
+  const newController = new AbortController();
+  setAbortController(newController);
+
+  try {
+    setLoading(true);
+    setError(null);
+    
       // Fetch transactions for this admin
-      const { data: transactionsData, error: transactionsError } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('admin_id', adminId)
-        .order('created_at', { ascending: false });
-
+// Fetch transactions for this admin
+const { data: transactionsData, error: transactionsError } = await supabase
+  .from('transactions')
+  .select('*')
+  .eq('admin_id', adminId)
+  .order('created_at', { ascending: false })
+  .abortSignal(newController.signal);
+    
       if (transactionsError) {
         throw transactionsError;
       }
@@ -127,10 +139,14 @@ export const useDashboardData = (adminId?: string) => {
 
       setData(stats);
       
-    } catch (err: any) {
-      console.error('Error fetching dashboard data:', err);
-      //setError(err.message || 'Failed to load dashboard data');
-      
+} catch (err: any) {
+  if (err.name === 'AbortError') {
+    console.log('Dashboard request cancelled');
+    return;
+  }
+  console.error('Error fetching dashboard data:', err);
+  //setError(err.message || 'Failed to load dashboard data');
+    
       // Set mock data for demo purposes
       setData({
         totalSales: 3248,
@@ -178,10 +194,14 @@ export const useDashboardData = (adminId?: string) => {
     }
   };
 
-  useEffect(() => {
-    fetchData();
-  }, [adminId]);
+useEffect(() => {
+  const timeoutId = setTimeout(() => {
+    fetchAdmin();
+  }, 300); // 300ms debounce
 
+  return () => clearTimeout(timeoutId);
+}, [adminId]);
+  
   return {
     data,
     transactions,
