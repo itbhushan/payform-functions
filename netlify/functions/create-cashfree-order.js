@@ -97,7 +97,7 @@ exports.handler = async (event, context) => {
     console.log('📝 Cashfree order data:', cashfreeOrderData);
 
     // Call Cashfree API
-    const cashfreeResponse = await fetch('https://sandbox-api.cashfree.com/pg/orders', {
+    const cashfreeResponse = await fetch('https://sandbox.cashfree.com/pg/orders', {
       method: 'POST',
       headers: {
         'x-client-id': CASHFREE_APP_ID,
@@ -145,7 +145,24 @@ exports.handler = async (event, context) => {
           gateway_fee: Number(gatewayFee.toFixed(2)),
           platform_commission: Number(platformCommission.toFixed(2)),
           net_amount_to_admin: Number(formAdminAmount.toFixed(2)),
-          admin_id: 'f807a8c3-316b-4df0-90e7-5f7796c86f71', // ✅ HARDCODED FOR NOW
+          //admin_id: 'f807a8c3-316b-4df0-90e7-5f7796c86f71', // ✅ HARDCODED FOR NOW
+          // Look up form admin from form_configs table
+        let adminId = 'f807a8c3-316b-4df0-90e7-5f7796c86f71'; // fallback
+        try {
+          const { data: formConfig } = await supabase
+            .from('form_configs')
+            .select('admin_id')
+            .eq('form_id', form_id)
+            .single();
+  
+          if (formConfig?.admin_id) {
+            adminId = formConfig.admin_id;
+            console.log('✅ Found form admin:', adminId);
+          }
+        } catch (formLookupError) {
+          console.warn('⚠️ Using fallback admin ID:', formLookupError.message);
+        }
+        admin_id: adminId, // ✅ Now dynamic
           created_at: new Date().toISOString()
         };
 
@@ -174,7 +191,7 @@ exports.handler = async (event, context) => {
         order_id: orderId,
         cf_order_id: cashfreeOrder.cf_order_id,
         payment_session_id: cashfreeOrder.payment_session_id,
-        checkout_url: `https://sandbox.cashfree.com/pg/view/order/${cashfreeOrder.cf_order_id}`,
+        checkout_url: `https://sandbox.cashfree.com/pg/view/order/${cashfreeOrder.payment_session_id}`,
         order_amount: totalAmount,
         commission_breakdown: {
           total_amount: totalAmount,
