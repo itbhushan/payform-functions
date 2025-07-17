@@ -106,7 +106,7 @@ exports.handler = async (event, context) => {
         success: true,
         order_id: orderId,
         cf_order_id: cashfreeOrder.cf_order_id,
-        checkout_url: `https://payments-test.cashfree.com/pay/${cashfreeOrder.payment_session_id}`,
+        checkout_url: `https://sandbox.cashfree.com/pg/view/${cashfreeOrder.payment_session_id}`,
         payment_session_id: cashfreeOrder.payment_session_id
       })
     };
