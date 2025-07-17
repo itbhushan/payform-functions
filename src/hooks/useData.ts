@@ -72,7 +72,7 @@ export interface FormConfig {
 }
 
 // Add this state at the top of useDashboardData hook
-const [abortController, setAbortController] = useState<AbortController | null>(null);
+//const [abortController, setAbortController] = useState<AbortController | null>(null);
 // Dashboard Data Hook
 export const useDashboardData = (adminId?: string) => {
   const [data, setData] = useState<DashboardStats | null>(null);
@@ -86,19 +86,10 @@ const fetchData = async () => {
     return;
   }
 
-  // Cancel previous request
-  if (abortController) {
-    abortController.abort();
-  }
-
-  const newController = new AbortController();
-  setAbortController(newController);
-
   try {
     setLoading(true);
     setError(null);
     
-      // Fetch transactions for this admin
 // Fetch transactions for this admin
 const { data: transactionsData, error: transactionsError } = await supabase
   .from('transactions')
