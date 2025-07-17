@@ -110,11 +110,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // Fallback timeout to prevent infinite loading
     const fallbackTimeout = setTimeout(() => {
       if (mounted && loading) {
-        console.warn('⚠️ Auth loading timeout - stopping loading state');
-        setLoading(false);
+      console.warn('⚠️ Auth loading timeout - stopping loading state');
+      setLoading(false);
+      setUser(null);
+      setSession(null);
+      setProfile(null);
       }
-    }, 10000); // 10 second timeout
-
+    }, 5000); // 5 second timeout
+    
     return () => {
       mounted = false;
       clearTimeout(fallbackTimeout);
@@ -131,14 +134,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setTimeout(() => reject(new Error('Profile load timeout')), 8000)
       );
       
-      const profilePromise = supabase
-        .from('form_admins')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
-      const { data, error } = await Promise.race([profilePromise, timeoutPromise]) as any;
-
+  const { data, error } = await Promise.race([
+    supabase
+      .from('form_admins')
+      .select('*')
+      .eq('id', userId)
+      .single(),
+    timeoutPromise
+  ]) as any;
+      
       if (error && error.code !== 'PGRST116') {
         console.error('❌ Error loading profile:', error);
         return;
@@ -269,9 +273,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       console.log('✅ Auth data cleared');
       
       // Reload page to ensure clean state
-      setTimeout(() => {
-        window.location.reload();
-      }, 100);
+    // Let React handle the state change naturally
+    console.log('✅ Auth data cleared - React will handle UI updates');
     } catch (error) {
       console.error('❌ Error clearing auth data:', error);
       // Force reload anyway
