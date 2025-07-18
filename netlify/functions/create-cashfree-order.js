@@ -106,7 +106,7 @@ exports.handler = async (event, context) => {
         success: true,
         order_id: orderId,
         cf_order_id: cashfreeOrder.cf_order_id,
-        checkout_url: `https://sandbox.cashfree.com/billpay/checkout/post/submit/${cashfreeOrder.payment_session_id}`,
+        const checkoutUrl = `https://sandbox.cashfree.com/pg/view/order/${cashfreeOrder.cf_order_id}/${cashfreeOrder.payment_session_id}`,
         payment_session_id: cashfreeOrder.payment_session_id
       })
     };
