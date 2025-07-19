@@ -228,11 +228,7 @@ function generateSuccessPage(orderData, email) {
           </div>
 
           <p>You will receive a confirmation email shortly.</p>
-          
-          <a href="https://payform2025.netlify.app" class="btn">
-            🏠 Go to Dashboard
-          </a>
-          
+                  
           <p style="color: #666; margin-top: 30px; font-size: 14px;">You can now close this window.</p>
         </div>
       </body>
