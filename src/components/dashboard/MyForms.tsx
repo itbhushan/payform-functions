@@ -347,32 +347,37 @@ const FormCard: React.FC<{
 
         {/* ✅ FIX 3: Removed Products section - products come from form responses */}
 
-        {/* ✅ FIX 2: Enhanced Actions with Edit button */}
-        <div className="grid grid-cols-3 gap-2 mb-3">
-          <button
-            onClick={() => setShowDetails(true)}
-            className="bg-blue-50 text-blue-700 hover:bg-blue-100 px-3 py-2 rounded text-sm font-medium"
-          >
-            📊 Details
-          </button>
-          <button
-            onClick={() => onEdit(form)}
-            className="bg-gray-50 text-gray-700 hover:bg-gray-100 px-3 py-2 rounded text-sm font-medium"
-          >
-            ✏️ Edit
-          </button>
-          <button
-            onClick={toggleFormStatus}
-            className={`px-3 py-2 rounded text-sm font-medium ${
-              form.is_active
-                ? 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100'
-                : 'bg-green-50 text-green-700 hover:bg-green-100'
-            }`}
-          >
-            {form.is_active ? '⏸️ Pause' : '▶️ Activate'}
-          </button>
-        </div>
-
+{/* ✅ FIX 2: Enhanced Actions with Edit and Delete buttons */}
+<div className="grid grid-cols-4 gap-2 mb-3">
+  <button
+    onClick={() => setShowDetails(true)}
+    className="bg-blue-50 text-blue-700 hover:bg-blue-100 px-2 py-2 rounded text-xs font-medium"
+  >
+    📊 Details
+  </button>
+  <button
+    onClick={() => onEdit(form)}
+    className="bg-gray-50 text-gray-700 hover:bg-gray-100 px-2 py-2 rounded text-xs font-medium"
+  >
+    ✏️ Edit
+  </button>
+  <button
+    onClick={toggleFormStatus}
+    className={`px-2 py-2 rounded text-xs font-medium ${
+      form.is_active
+        ? 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100'
+        : 'bg-green-50 text-green-700 hover:bg-green-100'
+    }`}
+  >
+    {form.is_active ? '⏸️ Pause' : '▶️ Active'}
+  </button>
+  <button
+    onClick={deleteForm}
+    className="bg-red-50 text-red-700 hover:bg-red-100 px-2 py-2 rounded text-xs font-medium"
+  >
+    🗑️ Delete
+  </button>
+</div>
         {/* Quick Actions */}
         <div className="flex justify-between text-xs">
           <a 
