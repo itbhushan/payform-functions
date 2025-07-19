@@ -62,62 +62,82 @@ exports.handler = async (event, context) => {
 
     const orderData = await orderResponse.json();
     console.log('✅ Order status:', orderData.order_status);
+    console.log('📊 Full order data:', JSON.stringify(orderData, null, 2));
 
-console.log('📊 Full order data:', JSON.stringify(orderData, null, 2));
-
-// Handle both PAID and ACTIVE status as successful
-if (orderData.order_status === 'PAID' || orderData.order_status === 'ACTIVE') {
+    // Handle both PAID and ACTIVE status as successful
+    if (orderData.order_status === 'PAID' || orderData.order_status === 'ACTIVE') {
       console.log('✅ Payment confirmed, updating database...');
 
-      // Update transaction in database
+      // Update transaction in database - SINGLE CLEAN IMPLEMENTATION
       if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
         const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
         
-// Update transaction in database with multiple matching strategies
-if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-  
-  console.log('🔍 Looking for transaction with order_id:', order_id);
-  
-  // Strategy 1: Try matching by transaction_id
-  let { data: updatedData, error: updateError } = await supabase
-    .from('transactions')
-    .update({
-      payment_status: 'paid',
-      updated_at: new Date().toISOString()
-    })
-    .eq('transaction_id', order_id)
-    .select();
-
-  console.log('📊 Update result by transaction_id:', updatedData?.length || 0, 'rows affected');
-
-  // Strategy 2: If no rows updated, try by cashfree_order_id
-  if (!updatedData || updatedData.length === 0) {
-    console.log('🔄 Trying to match by cashfree_order_id...');
-    
-    const { data: byCashfreeId, error: cashfreeError } = await supabase
-      .from('transactions')
-      .update({
-        payment_status: 'paid',
-        updated_at: new Date().toISOString()
-      })
-      .eq('cashfree_order_id', orderData.cf_order_id)
-      .select();
-
-    if (cashfreeError) {
-      console.error('❌ Database update error:', cashfreeError);
-    } else {
-      console.log('✅ Transaction updated by cashfree_order_id:', byCashfreeId?.length || 0, 'rows');
-    }
-  } else {
-    console.log('✅ Transaction updated by transaction_id successfully');
-  }
-}
+        console.log('🔍 Looking for transaction with order_id:', order_id);
         
-        if (error) {
-          console.error('❌ Database update error:', error);
+        // Strategy 1: Try matching by transaction_id (cashfree_order_id)
+        let { data: updatedData, error: updateError } = await supabase
+          .from('transactions')
+          .update({
+            payment_status: 'paid',
+            cashfree_order_id: orderData.cf_order_id,
+            updated_at: new Date().toISOString()
+          })
+          .eq('cashfree_order_id', order_id)
+          .select();
+
+        console.log('📊 Update result by cashfree_order_id:', updatedData?.length || 0, 'rows affected');
+
+        // Strategy 2: If no rows updated, try by matching transaction_id field
+        if (!updatedData || updatedData.length === 0) {
+          console.log('🔄 Trying to match by transaction_id field...');
+          
+          const { data: byTransactionId, error: transactionError } = await supabase
+            .from('transactions')
+            .update({
+              payment_status: 'paid',
+              cashfree_order_id: orderData.cf_order_id,
+              updated_at: new Date().toISOString()
+            })
+            .eq('transaction_id', order_id)
+            .select();
+
+          if (transactionError) {
+            console.error('❌ Database update error:', transactionError);
+          } else {
+            console.log('✅ Transaction updated by transaction_id:', byTransactionId?.length || 0, 'rows');
+            updatedData = byTransactionId;
+          }
         } else {
-          console.log('✅ Transaction updated successfully');
+          console.log('✅ Transaction updated by cashfree_order_id successfully');
+        }
+
+        // Strategy 3: If still no match, try by email and form_id
+        if (!updatedData || updatedData.length === 0) {
+          console.log('🔄 Trying to match by email and form_id...');
+          
+          const { data: byEmailForm, error: emailFormError } = await supabase
+            .from('transactions')
+            .update({
+              payment_status: 'paid',
+              cashfree_order_id: orderData.cf_order_id,
+              transaction_id: order_id,
+              updated_at: new Date().toISOString()
+            })
+            .eq('email', email)
+            .eq('form_id', form_id)
+            .eq('payment_status', 'pending')
+            .select();
+
+          if (emailFormError) {
+            console.error('❌ Database update error:', emailFormError);
+          } else {
+            console.log('✅ Transaction updated by email+form_id:', byEmailForm?.length || 0, 'rows');
+            updatedData = byEmailForm;
+          }
+        }
+
+        if (updateError && !updatedData) {
+          console.error('❌ All database update attempts failed:', updateError);
         }
       }
 
@@ -180,6 +200,18 @@ function generateSuccessPage(orderData, email) {
             margin: 20px 0; 
             border-left: 4px solid #4caf50; 
           }
+          .btn { 
+            background: #4caf50; 
+            color: white; 
+            padding: 12px 24px; 
+            border: none; 
+            border-radius: 6px; 
+            font-size: 16px; 
+            cursor: pointer; 
+            text-decoration: none; 
+            display: inline-block; 
+            margin-top: 20px; 
+          }
         </style>
       </head>
       <body>
@@ -196,6 +228,11 @@ function generateSuccessPage(orderData, email) {
           </div>
 
           <p>You will receive a confirmation email shortly.</p>
+          
+          <a href="https://payform2025.netlify.app" class="btn">
+            🏠 Go to Dashboard
+          </a>
+          
           <p style="color: #666; margin-top: 30px; font-size: 14px;">You can now close this window.</p>
         </div>
       </body>
@@ -217,6 +254,9 @@ function generateErrorPage(message) {
           <h2 style="color: #dc3545;">❌ Payment Error</h2>
           <p>${message}</p>
           <p>Please contact support if this issue persists.</p>
+          <a href="https://payform2025.netlify.app" style="background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 15px;">
+            🏠 Go to Dashboard
+          </a>
         </div>
       </body>
     </html>
@@ -237,6 +277,9 @@ function generateCancelledPage() {
           <h2 style="color: #ffc107;">⚠️ Payment Cancelled</h2>
           <p>Your payment was cancelled. No charges were made.</p>
           <p>You can try again or contact support if you need assistance.</p>
+          <a href="https://payform2025.netlify.app" style="background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 15px;">
+            🏠 Go to Dashboard
+          </a>
         </div>
       </body>
     </html>
@@ -257,6 +300,9 @@ function generatePendingPage(status) {
           <h2 style="color: #ffc107;">⏳ Payment Pending</h2>
           <p>Your payment status: <strong>${status}</strong></p>
           <p>Please wait while we process your payment.</p>
+          <a href="https://payform2025.netlify.app" style="background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 15px;">
+            🏠 Go to Dashboard
+          </a>
         </div>
       </body>
     </html>
