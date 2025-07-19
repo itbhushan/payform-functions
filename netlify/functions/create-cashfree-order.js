@@ -114,23 +114,32 @@ exports.handler = async (event, context) => {
       body: JSON.stringify(linkData)
     });
 
-    if (linkResponse.ok) {
-      const linkResult = await linkResponse.json();
-      console.log('✅ Payment link created:', linkResult.link_url);
-      
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({
-          success: true,
-          order_id: orderId,
-          cf_order_id: cashfreeOrder.cf_order_id,
-          checkout_url: linkResult.link_url
-        })
-      };
-    }
-
+if (linkResponse.ok) {
+  const linkResult = await linkResponse.json();
+  console.log('✅ Payment link created:', linkResult.link_url);
+  
+  // ✅ ADD DATABASE LOGGING
+  await logTransactionToDatabase(orderId, cashfreeOrder, {
+    form_id, email, product_name, product_price, customer_name, customer_phone
+  });
+  
+  return {
+    statusCode: 200,
+    headers,
+    body: JSON.stringify({
+      success: true,
+      order_id: orderId,
+      cf_order_id: cashfreeOrder.cf_order_id,
+      checkout_url: linkResult.link_url
+    })
+  };
+}
     // Final fallback
+    // ✅ ADD DATABASE LOGGING HERE TOO
+    await logTransactionToDatabase(orderId, cashfreeOrder, {
+      form_id, email, product_name, product_price, customer_name, customer_phone
+    });
+    
     return {
       statusCode: 200,
       headers,
@@ -150,4 +159,82 @@ exports.handler = async (event, context) => {
       body: JSON.stringify({ success: false, error: error.message })
     };
   }
+
+// ✅ ADD THIS ENTIRE FUNCTION:
+async function logTransactionToDatabase(orderId, cashfreeOrder, orderDetails) {
+  try {
+    const SUPABASE_URL = process.env.SUPABASE_URL;
+    const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      console.log('⚠️ Supabase credentials not configured, skipping database logging');
+      return;
+    }
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    
+    // Look up form admin from form_configs table
+    let adminId = 'f807a8c3-316b-4df0-90e7-5f7796c86f71'; // fallback for bhuvnagreens@gmail.com
+    try {
+      const { data: formConfig } = await supabase
+        .from('form_configs')
+        .select('admin_id')
+        .eq('form_id', orderDetails.form_id)
+        .single();
+      
+      if (formConfig?.admin_id) {
+        adminId = formConfig.admin_id;
+        console.log('✅ Found form admin:', adminId);
+      } else {
+        console.log('⚠️ Form config not found, using fallback admin ID');
+      }
+    } catch (formLookupError) {
+      console.warn('⚠️ Form lookup failed, using fallback admin ID:', formLookupError.message);
+    }
+
+    // Calculate commission split
+    const totalAmount = parseFloat(orderDetails.product_price);
+    const gatewayFee = (totalAmount * 2.5 / 100) + 3; // Cashfree: 2.5% + ₹3
+    const platformCommission = totalAmount * 3 / 100; // Your 3%
+    const netAmountToAdmin = totalAmount - gatewayFee - platformCommission;
+
+    // Insert transaction record
+    const transactionData = {
+      form_id: orderDetails.form_id,
+      email: orderDetails.email,
+      customer_name: orderDetails.customer_name,
+      product_name: orderDetails.product_name,
+      payment_amount: totalAmount,
+      payment_currency: 'INR',
+      payment_status: 'pending',
+      payment_provider: 'cashfree',
+      transaction_id: orderId,
+      cashfree_order_id: cashfreeOrder.cf_order_id,
+      gateway_fee: Number(gatewayFee.toFixed(2)),
+      platform_commission: Number(platformCommission.toFixed(2)),
+      net_amount_to_admin: Number(netAmountToAdmin.toFixed(2)),
+      admin_id: adminId, // ✅ Now dynamic
+      created_at: new Date().toISOString()
+    };
+
+    console.log('💾 Logging transaction to database:', {
+      transaction_id: orderId,
+      admin_id: adminId,
+      amount: totalAmount
+    });
+
+    const { error: dbError } = await supabase
+      .from('transactions')
+      .insert([transactionData]);
+
+    if (dbError) {
+      console.error('❌ Database logging error:', dbError);
+    } else {
+      console.log('✅ Transaction logged to database successfully');
+    }
+
+  } catch (error) {
+    console.error('❌ Database logging failed:', error);
+  }
+}
 };
