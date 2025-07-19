@@ -99,18 +99,25 @@ exports.handler = async (event, context) => {
     console.log('🔍 payment_session_id:', cashfreeOrder.payment_session_id);
     console.log('🔍 order_token:', cashfreeOrder.order_token);
     
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({
-        success: true,
-        order_id: orderId,
-        cf_order_id: cashfreeOrder.cf_order_id,
-        checkout_url: `https://sandbox.cashfree.com/pg/orders/pay/${cashfreeOrder.cf_order_id}`, // Using cf_order_id instead
-        payment_session_id: cashfreeOrder.payment_session_id
-      })
-    };
+// Clean the malformed session ID
+let cleanSessionId = cashfreeOrder.payment_session_id;
+if (cleanSessionId.endsWith('paymentpayment')) {
+  cleanSessionId = cleanSessionId.replace(/paymentpayment$/, '');
+  console.log('🔧 Cleaned session ID:', cleanSessionId);
+}
 
+return {
+  statusCode: 200,
+  headers,
+  body: JSON.stringify({
+    success: true,
+    order_id: orderId,
+    cf_order_id: cashfreeOrder.cf_order_id,
+    checkout_url: `https://payments.cashfree.com/forms/${cleanSessionId}`,
+    payment_session_id: cleanSessionId
+  })
+};
+    
   } catch (error) {
     console.error('❌ Function error:', error);
     return {
