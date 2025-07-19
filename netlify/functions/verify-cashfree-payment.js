@@ -70,14 +70,47 @@ exports.handler = async (event, context) => {
       if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
         const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
         
-        const { error } = await supabase
-          .from('transactions')
-          .update({
-            payment_status: 'paid',
-            updated_at: new Date().toISOString()
-          })
-          .eq('transaction_id', order_id);
+// Update transaction in database with multiple matching strategies
+if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  
+  console.log('🔍 Looking for transaction with order_id:', order_id);
+  
+  // Strategy 1: Try matching by transaction_id
+  let { data: updatedData, error: updateError } = await supabase
+    .from('transactions')
+    .update({
+      payment_status: 'paid',
+      updated_at: new Date().toISOString()
+    })
+    .eq('transaction_id', order_id)
+    .select();
 
+  console.log('📊 Update result by transaction_id:', updatedData?.length || 0, 'rows affected');
+
+  // Strategy 2: If no rows updated, try by cashfree_order_id
+  if (!updatedData || updatedData.length === 0) {
+    console.log('🔄 Trying to match by cashfree_order_id...');
+    
+    const { data: byCashfreeId, error: cashfreeError } = await supabase
+      .from('transactions')
+      .update({
+        payment_status: 'paid',
+        updated_at: new Date().toISOString()
+      })
+      .eq('cashfree_order_id', orderData.cf_order_id)
+      .select();
+
+    if (cashfreeError) {
+      console.error('❌ Database update error:', cashfreeError);
+    } else {
+      console.log('✅ Transaction updated by cashfree_order_id:', byCashfreeId?.length || 0, 'rows');
+    }
+  } else {
+    console.log('✅ Transaction updated by transaction_id successfully');
+  }
+}
+        
         if (error) {
           console.error('❌ Database update error:', error);
         } else {
