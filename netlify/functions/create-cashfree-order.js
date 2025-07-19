@@ -13,113 +13,121 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    console.log('🚀 Creating Cashfree order...');
-    console.log('Request body:', event.body);
-
-    // ✅ FIX 2: Safe JSON parsing
-    let requestData;
-    try {
-      requestData = JSON.parse(event.body || '{}');
-    } catch (parseError) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ success: false, error: 'Invalid JSON' })
-      };
-    }
-
-    const { form_id, email, product_name, product_price, customer_name = "Customer", customer_phone = "9999999999" } = requestData;
-
-    if (!form_id || !email || !product_name || !product_price) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ success: false, error: 'Missing required fields' })
-      };
-    }
+    console.log('🚀 Starting comprehensive Cashfree test...');
+    
+    const { form_id, email, product_name, product_price, customer_name = "Customer", customer_phone = "9999999999" } = JSON.parse(event.body || '{}');
 
     const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
     const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
 
-    if (!CASHFREE_APP_ID || !CASHFREE_SECRET_KEY) {
-      return {
-        statusCode: 500,
-        headers,
-        body: JSON.stringify({ success: false, error: 'Cashfree credentials not configured' })
-      };
-    }
+    // Test 1: Check credentials format
+    console.log('🔍 Credentials check:');
+    console.log('- App ID exists:', !!CASHFREE_APP_ID);
+    console.log('- App ID starts with CF:', CASHFREE_APP_ID?.startsWith?.('CF'));
+    console.log('- Secret exists:', !!CASHFREE_SECRET_KEY);
+    console.log('- App ID length:', CASHFREE_APP_ID?.length);
 
     const orderId = `payform_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const totalAmount = parseFloat(product_price);
 
-    const cashfreeOrderData = {
+    // Test 2: Try minimal order creation with detailed logging
+    const minimalOrderData = {
       order_id: orderId,
-      order_amount: totalAmount,
+      order_amount: parseFloat(product_price),
       order_currency: "INR",
       customer_details: {
         customer_id: email.replace('@', '_').replace('.', '_'),
         customer_name: customer_name,
         customer_email: email,
         customer_phone: customer_phone
-      },
-      order_meta: {
-        return_url: `https://payform2025.netlify.app/.netlify/functions/verify-cashfree-payment?order_id=${orderId}&form_id=${form_id}&email=${encodeURIComponent(email)}`
       }
     };
 
-    console.log('📝 Cashfree order data:', cashfreeOrderData);
+    console.log('📝 Minimal order data:', JSON.stringify(minimalOrderData, null, 2));
 
-    // ✅ FIX 1: Correct API URL
-    const cashfreeResponse = await fetch('https://sandbox.cashfree.com/pg/orders', {
-      method: 'POST',
-      headers: {
-        'x-client-id': CASHFREE_APP_ID,
-        'x-client-secret': CASHFREE_SECRET_KEY,
-        'x-api-version': '2023-08-01',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(cashfreeOrderData)
-    });
+    // Test 3: Try different API versions
+    const apiVersions = ['2023-08-01', '2022-09-01', '2021-05-21'];
+    
+    for (const version of apiVersions) {
+      console.log(`🧪 Testing API version: ${version}`);
+      
+      try {
+        const response = await fetch('https://sandbox.cashfree.com/pg/orders', {
+          method: 'POST',
+          headers: {
+            'x-client-id': CASHFREE_APP_ID,
+            'x-client-secret': CASHFREE_SECRET_KEY,
+            'x-api-version': version,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify(minimalOrderData)
+        });
 
-    if (!cashfreeResponse.ok) {
-      const errorText = await cashfreeResponse.text();
-      console.error('❌ Cashfree API error:', errorText);
-      return {
-        statusCode: 500,
-        headers,
-        body: JSON.stringify({ success: false, error: 'Cashfree API error', details: errorText })
-      };
+        console.log(`📊 Version ${version} - Status: ${response.status}`);
+        const responseText = await response.text();
+        console.log(`📊 Version ${version} - Response:`, responseText);
+
+        if (response.ok) {
+          const orderData = JSON.parse(responseText);
+          console.log('✅ SUCCESS with version:', version);
+          
+          // Test different checkout URL formats
+          const checkoutUrls = [
+            `https://sandbox.cashfree.com/pg/checkout?order_id=${orderData.cf_order_id}`,
+            `https://payments.cashfree.com/pay/${orderData.payment_session_id}`,
+            `https://sandbox.cashfree.com/pg/orders/pay/${orderData.cf_order_id}`,
+            `https://test.cashfree.com/billpay/checkout/post/submit/${orderData.payment_session_id}`
+          ];
+
+          return {
+            statusCode: 200,
+            headers,
+            body: JSON.stringify({
+              success: true,
+              order_id: orderId,
+              cf_order_id: orderData.cf_order_id,
+              working_api_version: version,
+              possible_checkout_urls: checkoutUrls,
+              recommended_url: checkoutUrls[0],
+              full_order_response: orderData
+            })
+          };
+        }
+      } catch (versionError) {
+        console.log(`❌ Version ${version} failed:`, versionError.message);
+      }
     }
 
-    const cashfreeOrder = await cashfreeResponse.json();
-    console.log('✅ Cashfree order created:', cashfreeOrder);
-    // Log specific fields we need
-    console.log('🔍 Available fields:', Object.keys(cashfreeOrder));
-    console.log('🔍 cf_order_id:', cashfreeOrder.cf_order_id);
-    console.log('🔍 payment_session_id:', cashfreeOrder.payment_session_id);
-    console.log('🔍 order_token:', cashfreeOrder.order_token);
-    
-// Use simple checkout URL format
-const checkoutUrl = `https://sandbox.cashfree.com/pg/checkout?order_id=${cashfreeOrder.cf_order_id}`;
-
-return {
-  statusCode: 200,
-  headers,
-  body: JSON.stringify({
-    success: true,
-    order_id: orderId,
-    cf_order_id: cashfreeOrder.cf_order_id,
-    checkout_url: checkoutUrl,
-    payment_session_id: cashfreeOrder.payment_session_id
-  })
-};
-    
-  } catch (error) {
-    console.error('❌ Function error:', error);
+    // If all versions fail, return diagnostic info
     return {
       statusCode: 500,
       headers,
-      body: JSON.stringify({ success: false, error: 'Internal server error', details: error.message })
+      body: JSON.stringify({
+        success: false,
+        error: 'All API versions failed',
+        credentials_check: {
+          app_id_exists: !!CASHFREE_APP_ID,
+          secret_exists: !!CASHFREE_SECRET_KEY,
+          app_id_format: CASHFREE_APP_ID?.substring(0, 3) + '***'
+        },
+        next_steps: [
+          'Check Cashfree dashboard for correct credentials',
+          'Verify sandbox environment is enabled',
+          'Check API documentation for latest version'
+        ]
+      })
+    };
+
+  } catch (error) {
+    console.error('❌ Diagnostic error:', error);
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ 
+        success: false, 
+        error: 'Diagnostic failed', 
+        details: error.message 
+      })
     };
   }
 };
