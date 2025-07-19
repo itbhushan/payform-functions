@@ -99,12 +99,8 @@ exports.handler = async (event, context) => {
     console.log('🔍 payment_session_id:', cashfreeOrder.payment_session_id);
     console.log('🔍 order_token:', cashfreeOrder.order_token);
     
-// Clean the malformed session ID (keep this part)
-let cleanSessionId = cashfreeOrder.payment_session_id;
-if (cleanSessionId.endsWith('paymentpayment')) {
-  cleanSessionId = cleanSessionId.replace(/paymentpayment$/, '');
-  console.log('🔧 Cleaned session ID:', cleanSessionId);
-}
+// Use simple checkout URL format
+const checkoutUrl = `https://sandbox.cashfree.com/pg/checkout?order_id=${cashfreeOrder.cf_order_id}`;
 
 return {
   statusCode: 200,
@@ -113,8 +109,8 @@ return {
     success: true,
     order_id: orderId,
     cf_order_id: cashfreeOrder.cf_order_id,
-    checkout_url: `https://sandbox.cashfree.com/pg/orders/pay/${cashfreeOrder.cf_order_id}`, // ✅ Use cf_order_id instead
-    payment_session_id: cleanSessionId
+    checkout_url: checkoutUrl,
+    payment_session_id: cashfreeOrder.payment_session_id
   })
 };
     
