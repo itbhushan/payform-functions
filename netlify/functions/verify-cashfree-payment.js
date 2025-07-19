@@ -63,7 +63,10 @@ exports.handler = async (event, context) => {
     const orderData = await orderResponse.json();
     console.log('✅ Order status:', orderData.order_status);
 
-    if (orderData.order_status === 'PAID') {
+console.log('📊 Full order data:', JSON.stringify(orderData, null, 2));
+
+// Handle both PAID and ACTIVE status as successful
+if (orderData.order_status === 'PAID' || orderData.order_status === 'ACTIVE') {
       console.log('✅ Payment confirmed, updating database...');
 
       // Update transaction in database
