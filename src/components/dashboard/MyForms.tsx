@@ -271,6 +271,27 @@ const FormCard: React.FC<{
     }
   };
 
+  const deleteForm = async () => {
+  if (!confirm('Are you sure you want to delete this form? This action cannot be undone.')) {
+    return;
+  }
+  
+  try {
+    const { error } = await supabase
+      .from('form_configs')
+      .delete()
+      .eq('id', form.id);
+      
+    if (error) throw error;
+    
+    onRefresh();
+    alert('Form deleted successfully');
+  } catch (error) {
+    console.error('Error deleting form:', error);
+    alert('Failed to delete form');
+  }
+};
+
   return (
     <div className="bg-white border border-gray-200 rounded-lg hover:shadow-md transition-shadow">
       <div className="p-6">
