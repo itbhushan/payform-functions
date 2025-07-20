@@ -74,17 +74,18 @@ exports.handler = async (event, context) => {
         
         console.log('🔍 Looking for transaction with order_id:', order_id);
         
-        // Strategy 1: Try matching by transaction_id (cashfree_order_id)
-        let { data: updatedData, error: updateError } = await supabase
-          .from('transactions')
-          .update({
-            payment_status: 'paid',
-            cashfree_order_id: orderData.cf_order_id,
-            updated_at: new Date().toISOString()
-          })
-          .eq('cashfree_order_id', order_id)
-          .select();
-
+// Strategy 1: Try matching by cashfree_order_id first
+let { data: updatedData, error: updateError } = await supabase
+  .from('transactions')
+  .update({
+    payment_status: 'paid',
+    cashfree_payment_id: orderData.cf_order_id,
+    customer_name: orderData.customer_details.customer_name,
+    updated_at: new Date().toISOString()
+  })
+  .eq('cashfree_order_id', order_id)
+  .select();
+        
         console.log('📊 Update result by cashfree_order_id:', updatedData?.length || 0, 'rows affected');
 
         // Strategy 2: If no rows updated, try by matching transaction_id field
