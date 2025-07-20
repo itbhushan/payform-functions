@@ -166,6 +166,8 @@ const Dashboard: React.FC = () => {
   // Use real data hooks based on user role
   //const adminId = isFormAdmin ? user?.id : undefined;
   const adminId = user?.id; // Temporary fix - force adminId for testing
+  console.log('🎯 APP.TSX ADMIN ID BEING PASSED:', adminId);
+  console.log('🎯 USER OBJECT:', user);
   const { data: dashboardData, transactions, loading: dashboardLoading, error: dashboardError, refetch } = useDashboardData(adminId);
   const { admin, loading: adminLoading } = useFormAdmin(adminId);
   const { data: platformData, loading: platformLoading, error: platformError } = usePlatformData();
