@@ -148,15 +148,17 @@ const { data: transactionsData, error: transactionsError } = await supabase
       const pendingTransactions = allTransactions.filter(t => t.payment_status === 'pending').length;
       const totalEarnings = allTransactions.reduce((sum, t) => sum + (t.net_amount_to_admin || 0), 0);
 
-     // ADD THESE DEBUG LOGS:
-      console.log('🔍 DEBUG: stats calculated:', {
-        totalSales,
-        totalTransactions: allTransactions.length,
-        completedTransactions,
-        pendingTransactions,
-        totalEarnings
-      });
-      
+// Enhanced debug logs
+console.log('🔍 DEBUG: Admin ID:', adminId);
+console.log('🔍 DEBUG: Transactions found:', allTransactions?.length || 0);
+console.log('🔍 DEBUG: Sample transaction:', allTransactions?.[0]);
+console.log('🔍 DEBUG: Stats calculated:', {
+  totalSales,
+  totalTransactions: allTransactions.length,
+  completedTransactions,
+  pendingTransactions,
+  totalEarnings
+});      
       const stats: DashboardStats = {
         totalSales,
         totalTransactions: allTransactions.length,
@@ -173,17 +175,17 @@ const { data: transactionsData, error: transactionsError } = await supabase
     return;
   }
   console.error('Error fetching dashboard data:', err);
-  //setError(err.message || 'Failed to load dashboard data');
+  setError(err.message || 'Failed to load dashboard data');
+  
+  // Don't use mock data - show the actual error
+  setData({
+    totalSales: 0,
+    totalTransactions: 0,
+    completedTransactions: 0,
+    pendingTransactions: 0,
+    totalEarnings: 0
+  });
     
-      // Set mock data for demo purposes
-      setData({
-        totalSales: 3248,
-        totalTransactions: 12,
-        completedTransactions: 8,
-        pendingTransactions: 4,
-        totalEarnings: 97.44
-      });
-      
       // Set mock transactions
       setTransactions([
         {
