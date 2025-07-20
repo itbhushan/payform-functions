@@ -169,6 +169,24 @@ const Dashboard: React.FC = () => {
   console.log('🎯 APP.TSX ADMIN ID BEING PASSED:', adminId);
   console.log('🎯 USER OBJECT:', user);
   const { data: dashboardData, transactions, loading: dashboardLoading, error: dashboardError, refetch } = useDashboardData(adminId);
+// ✅ Enhanced refresh function with debug logging
+const handleRefresh = React.useCallback(() => {
+  console.log('🔄 MANUAL REFRESH TRIGGERED');
+  console.log('🔍 Current admin ID:', adminId);
+  console.log('🔍 Current stats:', dashboardData);
+  console.log('🔍 Current transactions count:', transactions?.length);
+  
+  // Force a fresh data fetch
+  refetch();
+  
+  // Also refresh MyForms if it's active
+  if (activeTab === 'forms') {
+    console.log('🔄 Also refreshing forms data...');
+    // This will be handled by MyForms component
+  }
+}, [refetch, adminId, dashboardData, transactions, activeTab]);
+
+  
   const { admin, loading: adminLoading } = useFormAdmin(adminId);
   const { data: platformData, loading: platformLoading, error: platformError } = usePlatformData();
   const { config: cashfreeConfig, loading: configLoading, saveConfig } = useCashfreeConfig(adminId);
@@ -274,11 +292,11 @@ const Dashboard: React.FC = () => {
         {/* DEBUG MODE - Replace this section with normal dashboard later */}
         {isFormAdmin && activeTab === 'dashboard' && (
           <DashboardContent 
-            stats={dashboardData} 
-            transactions={transactions}
-            loading={dashboardLoading}
-            error={dashboardError}
-            onRefresh={refetch}
+  stats={dashboardData} 
+  transactions={transactions}
+  loading={dashboardLoading}
+  error={dashboardError}
+  onRefresh={handleRefresh}
           />
         )}
         {isFormAdmin && activeTab === 'setup' && (
