@@ -203,9 +203,9 @@ exports.handler = async (event, context) => {
     }
 
     // Continue with payment creation...
-    const orderId = `ORDER_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const customerId = `CUST_${email.replace('@', '_').replace('.', '_')}_${Date.now()}`;
-
+    const orderId = `payform_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const customerId = email.replace('@', '_').replace('.', '_');
+    
     // Calculate commission breakdown
     const totalAmount = parseFloat(product_price);
     const gatewayFee = (totalAmount * 2.5 / 100) + 3;
@@ -214,7 +214,7 @@ exports.handler = async (event, context) => {
 
     // Return URLs for end users (not admin dashboard!)
     const baseUrl = 'https://payform2025.netlify.app';
-    const returnUrl = `${baseUrl}/.netlify/functions/verify-payment?order_id=${orderId}&form_id=${form_id}&email=${encodeURIComponent(email)}`;
+    const returnUrl = `${baseUrl}/.netlify/functions/verify-cashfree-payment?order_id=${orderId}&form_id=${form_id}&email=${encodeURIComponent(email)}`;
 
     console.log('🔗 Payment URLs:', { returnUrl });
 
@@ -284,25 +284,29 @@ exports.handler = async (event, context) => {
     }
 
     // Save transaction to database
-    const transactionData = {
-      form_id: form_id,
-      email: email,
-      customer_name: customer_name || email.split('@')[0],
-      product_name: product_name,
-      payment_amount: totalAmount,
-      payment_currency: 'INR',
-      payment_status: 'pending',
-      payment_provider: 'cashfree',
-      transaction_id: orderId,
-      cashfree_order_id: orderId,
-      cashfree_link_id: cashfreeResult.link_id,
-      gateway_fee: gatewayFee,
-      platform_commission: platformCommission,
-      net_amount_to_admin: netAmountToAdmin,
-      admin_id: form_admin_id || formConfig[0]?.admin_id,
-      created_at: new Date().toISOString()
-    };
+const adminId = form_admin_id || formConfig[0]?.admin_id;
 
+const transactionData = {
+  form_id: form_id,
+  email: email,
+  customer_name: customer_name || email.split('@')[0],
+  product_name: product_name,
+  payment_amount: totalAmount,
+  payment_currency: 'INR',
+  payment_status: 'pending',
+  payment_provider: 'cashfree',
+  transaction_id: orderId,
+  cashfree_order_id: orderId,
+  cashfree_link_id: cashfreeResult.link_id,
+  gateway_fee: Number(gatewayFee.toFixed(2)),
+  platform_commission: Number(platformCommission.toFixed(2)),
+  net_amount_to_admin: Number(netAmountToAdmin.toFixed(2)),
+  admin_id: adminId,
+  created_at: new Date().toISOString()
+};
+
+    console.log('💾 Transaction data to save:', transactionData);
+    console.log('🔍 Admin ID being used:', adminId);
     console.log('💾 Saving transaction to database...');
 
     const { error: dbError } = await supabase
