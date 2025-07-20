@@ -177,7 +177,7 @@ console.log('🔍 DEBUG: Stats calculated:', {
   console.error('Error fetching dashboard data:', err);
   setError(err.message || 'Failed to load dashboard data');
   
-  // Don't use mock data - show the actual error
+  // Show empty state - no mock data
   setData({
     totalSales: 0,
     totalTransactions: 0,
@@ -185,41 +185,9 @@ console.log('🔍 DEBUG: Stats calculated:', {
     pendingTransactions: 0,
     totalEarnings: 0
   });
+  setTransactions([]);
     
-      // Set mock transactions
-      setTransactions([
-        {
-          id: 1,
-          form_id: 'demo_form',
-          email: 'customer@example.com',
-          customer_name: 'John Doe',
-          product_name: 'E-Book',
-          payment_amount: 299,
-          payment_currency: 'INR',
-          payment_status: 'paid',
-          payment_provider: 'cashfree',
-          transaction_id: 'CF_12345',
-          net_amount_to_admin: 276.42,
-          admin_id: adminId,
-          created_at: new Date().toISOString()
-        },
-        {
-          id: 2,
-          form_id: 'demo_form',
-          email: 'user@test.com',
-          customer_name: 'Jane Smith',
-          product_name: 'Online Course',
-          payment_amount: 999,
-          payment_currency: 'INR',
-          payment_status: 'pending',
-          payment_provider: 'cashfree',
-          transaction_id: 'CF_67890',
-          net_amount_to_admin: 942.03,
-          admin_id: adminId,
-          created_at: new Date().toISOString()
-        }
-      ]);
-    } finally {
+  } finally {
       setLoading(false);
     }
   };
