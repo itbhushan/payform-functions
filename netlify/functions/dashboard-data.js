@@ -38,8 +38,20 @@ exports.handler = async (event, context) => {
       };
     }
 
-    // Get admin_id from query parameters (default to test admin)
-    const adminId = event.queryStringParameters?.admin_id || 'f807a8c3-316b-4df0-90e7-5f7796c86f71';
+// Get admin_id from query parameters - NO DEFAULT!
+const adminId = event.queryStringParameters?.admin_id;
+
+if (!adminId) {
+  console.error('❌ No admin_id provided');
+  return {
+    statusCode: 400,
+    headers,
+    body: JSON.stringify({ 
+      error: 'admin_id is required',
+      received_params: event.queryStringParameters
+    })
+  };
+}
     console.log('Admin ID:', adminId);
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
