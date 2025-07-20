@@ -121,7 +121,9 @@ const fetchData = async () => {
     setLoading(false);
     return;
   }
-
+  console.log('🚀 FETCHDATA CALLED WITH ADMIN_ID:', adminId);
+  console.log('🔍 CURRENT USER CONTEXT:', { adminId });
+  
   try {
     setLoading(true);
     setError(null);
