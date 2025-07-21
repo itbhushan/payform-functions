@@ -161,7 +161,7 @@ exports.handler = async (event, context) => {
         order_id: orderId,
         cf_order_id: cashfreeOrder.cf_order_id,
         checkout_url: checkoutUrl,
-        admin_id_used: await resolveAdminId(orderDetails) // ✅ For debugging
+        admin_id_used: adminId // ✅ Use already resolved adminId
       })
     };
 
