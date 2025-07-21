@@ -18,6 +18,9 @@ interface AuthContextType {
   signUp: (email: string, password: string, name: string, company_name?: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  // ✅ Add these missing properties
+  isFormAdmin: boolean;
+  isSuperAdmin: boolean;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -28,7 +31,10 @@ const AuthContext = createContext<AuthContextType>({
   signIn: async () => ({ error: null }),
   signUp: async () => ({ error: null }),
   signOut: async () => {},
-  refreshProfile: async () => {}
+  refreshProfile: async () => {},
+  // ✅ Add default values for missing properties
+  isFormAdmin: false,
+  isSuperAdmin: false
 });
 
 export const useAuth = () => {
@@ -281,17 +287,20 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
   };
 
-  const value: AuthContextType = {
-    user,
-    session,
-    loading,
-    error,
-    signIn,
-    signUp,
-    signOut,
-    refreshProfile
-  };
-
+const value: AuthContextType = {
+  user,
+  session,
+  loading,
+  error,
+  signIn,
+  signUp,
+  signOut,
+  refreshProfile,
+  // ✅ Add these missing functions that App.tsx expects
+  isFormAdmin: true, // All users are form admins for now
+  isSuperAdmin: user?.email === 'admin@payform.com' // Only this email is super admin
+};
+  
   return (
     <AuthContext.Provider value={value}>
       {children}
