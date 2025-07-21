@@ -291,14 +291,16 @@ const handleRefresh = React.useCallback(() => {
         {/* Form Admin Views */}
         {/* DEBUG MODE - Replace this section with normal dashboard later */}
         {isFormAdmin && activeTab === 'dashboard' && (
-          <DashboardContent 
+      
+<DashboardContent 
+  key={`dashboard-${dashboardData?.totalTransactions || 0}-${Date.now()}`}
   stats={dashboardData} 
   transactions={transactions}
   loading={dashboardLoading}
   error={dashboardError}
   onRefresh={handleRefresh}
-          />
-        )}
+/>
+    )}
         {isFormAdmin && activeTab === 'setup' && (
           <CashfreeSetup 
             config={cashfreeConfig}
