@@ -13,7 +13,7 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    const { form_id, email, product_name, product_price, customer_name = "Customer", customer_phone = "9999999999" } = JSON.parse(event.body || '{}');
+    const { form_id, email, product_name, product_price, customer_name = "Customer", customer_phone = "9999999999", form_admin_id } = JSON.parse(event.body || '{}');
 
     const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
     const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
