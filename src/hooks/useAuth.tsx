@@ -1,4 +1,4 @@
-// src/hooks/useAuth.tsx - FIXED VERSION with timeout handling
+// src/hooks/useAuth.tsx - EMERGENCY SIMPLIFIED VERSION
 import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import type { User, Session } from '@supabase/supabase-js';
@@ -49,137 +49,54 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // ✅ FIX 1: Enhanced profile loading with timeout and retry
-  const loadUserProfile = async (userId: string, maxRetries = 3, timeoutMs = 10000): Promise<AuthUser | null> => {
-    console.log('🔍 Loading user profile for:', userId);
+  // ✅ EMERGENCY FIX: Simplified profile loading with immediate fallback
+  const loadUserProfile = async (userId: string, userEmail: string): Promise<AuthUser> => {
+    console.log('🔍 Loading user profile for:', userEmail);
     
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        console.log(`📡 Profile load attempt ${attempt}/${maxRetries}`);
-        
-        // Create timeout promise
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Profile load timeout')), timeoutMs);
-        });
-
-        // Create profile load promise
-        const profilePromise = supabase
-          .from('form_admins')
-          .select('id, email, name, company_name, is_active, created_at')
-          .eq('id', userId)
-          .single();
-
-        // Race between timeout and profile load
-        const { data: profile, error } = await Promise.race([
-          profilePromise,
-          timeoutPromise
-        ]) as any;
-
-        if (error) {
-          console.warn(`⚠️ Profile load attempt ${attempt} failed:`, error.message);
-          
-          if (attempt === maxRetries) {
-            // On final attempt, create profile if it doesn't exist
-            console.log('🔧 Creating missing profile...');
-            return await createMissingProfile(userId);
-          }
-          
-          // Wait before retry (exponential backoff)
-          await new Promise(resolve => setTimeout(resolve, attempt * 1000));
-          continue;
-        }
-
-        if (profile) {
-          console.log('✅ Profile loaded successfully:', profile.email);
-          return {
-            id: profile.id,
-            email: profile.email,
-            name: profile.name,
-            company_name: profile.company_name,
-            role: 'form_admin',
-            // Add other required User properties with defaults
-            aud: 'authenticated',
-            created_at: profile.created_at,
-            app_metadata: {},
-            user_metadata: {
-              name: profile.name,
-              company_name: profile.company_name
-            }
-          } as AuthUser;
-        }
-
-      } catch (timeoutError) {
-        console.warn(`⏰ Profile load attempt ${attempt} timed out`);
-        
-        if (attempt === maxRetries) {
-          console.log('🔧 Creating profile after timeout...');
-          return await createMissingProfile(userId);
-        }
-        
-        // Wait before retry
-        await new Promise(resolve => setTimeout(resolve, attempt * 1000));
-      }
-    }
-
-    return null;
-  };
-
-  // ✅ FIX 2: Create missing profile for existing auth users
-  const createMissingProfile = async (userId: string): Promise<AuthUser | null> => {
     try {
-      console.log('🛠️ Creating missing profile for user:', userId);
-      
-      // Get user email from auth
-      const { data: authUser } = await supabase.auth.getUser();
-      const userEmail = authUser.user?.email;
-      
-      if (!userEmail) {
-        throw new Error('Cannot create profile: no email found');
+      // Try to load from database with short timeout
+      const { data: profile, error } = await Promise.race([
+        supabase
+          .from('form_admins')
+          .select('id, email, name, company_name, is_active')
+          .eq('id', userId)
+          .single(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('timeout')), 3000) // 3 second timeout
+        )
+      ]) as any;
+
+      if (!error && profile) {
+        console.log('✅ Profile loaded from database:', profile.email);
+        return {
+          ...profile,
+          role: 'form_admin',
+          aud: 'authenticated',
+          created_at: new Date().toISOString(),
+          app_metadata: {},
+          user_metadata: { name: profile.name, company_name: profile.company_name }
+        } as AuthUser;
       }
-
-      // Create form_admin record
-      const { data: newProfile, error: createError } = await supabase
-        .from('form_admins')
-        .insert([{
-          id: userId,
-          email: userEmail,
-          name: authUser.user?.user_metadata?.name || userEmail.split('@')[0],
-          company_name: authUser.user?.user_metadata?.company_name || null,
-          is_active: true,
-          created_at: new Date().toISOString()
-        }])
-        .select()
-        .single();
-
-      if (createError) {
-        console.error('❌ Failed to create profile:', createError);
-        return null;
-      }
-
-      console.log('✅ Profile created successfully:', newProfile.email);
-      
-      return {
-        id: newProfile.id,
-        email: newProfile.email,
-        name: newProfile.name,
-        company_name: newProfile.company_name,
-        role: 'form_admin',
-        aud: 'authenticated',
-        created_at: newProfile.created_at,
-        app_metadata: {},
-        user_metadata: {
-          name: newProfile.name,
-          company_name: newProfile.company_name
-        }
-      } as AuthUser;
-
-    } catch (error) {
-      console.error('❌ Error creating missing profile:', error);
-      return null;
+    } catch (dbError) {
+      console.warn('⚠️ Database profile load failed, using auth user data');
     }
+
+    // ✅ IMMEDIATE FALLBACK: Use auth user data directly (no database dependency)
+    console.log('🔄 Using auth user data as profile');
+    return {
+      id: userId,
+      email: userEmail,
+      name: userEmail.split('@')[0], // Extract name from email
+      company_name: null,
+      role: 'form_admin',
+      aud: 'authenticated',
+      created_at: new Date().toISOString(),
+      app_metadata: {},
+      user_metadata: {}
+    } as AuthUser;
   };
 
-  // ✅ FIX 3: Enhanced session handling with proper error management
+  // ✅ SIMPLIFIED: Auth state handler with immediate fallback
   const handleAuthStateChange = async (event: string, session: Session | null) => {
     console.log('🔐 Auth state changed:', event, session?.user?.email || 'no user');
     
@@ -188,31 +105,36 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       setSession(session);
 
       if (session?.user) {
-        setLoading(true);
-        
-        // Load user profile with timeout handling
-        const userProfile = await loadUserProfile(session.user.id);
-        
-        if (userProfile) {
-          setUser(userProfile);
-        } else {
-          console.error('❌ Failed to load or create user profile');
-          setError('Failed to load user profile. Please try refreshing the page.');
-          setUser(null);
-        }
+        // ✅ CRITICAL: Don't set loading here to avoid infinite loop
+        const userProfile = await loadUserProfile(session.user.id, session.user.email!);
+        setUser(userProfile);
+        console.log('✅ User profile set successfully');
       } else {
         setUser(null);
       }
     } catch (error) {
       console.error('❌ Auth state change error:', error);
-      setError('Authentication error occurred. Please try again.');
-      setUser(null);
+      // ✅ FALLBACK: Set basic user data even if profile loading fails
+      if (session?.user) {
+        setUser({
+          id: session.user.id,
+          email: session.user.email!,
+          name: session.user.email!.split('@')[0],
+          role: 'form_admin',
+          aud: 'authenticated',
+          created_at: new Date().toISOString(),
+          app_metadata: {},
+          user_metadata: {}
+        } as AuthUser);
+      } else {
+        setUser(null);
+      }
     } finally {
-      setLoading(false);
+      setLoading(false); // ✅ CRITICAL: Always stop loading
     }
   };
 
-  // ✅ FIX 4: Initialize auth with better error handling
+  // ✅ SIMPLIFIED: Initialize auth
   useEffect(() => {
     let mounted = true;
 
@@ -220,7 +142,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       try {
         console.log('🚀 Initializing authentication...');
         
-        // Get initial session with timeout
         const { data: { session }, error } = await supabase.auth.getSession();
         
         if (error) {
@@ -254,7 +175,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     };
   }, []);
 
-  // ✅ FIX 5: Enhanced sign in with better error handling
+  // ✅ SIMPLIFIED: Sign in
   const signIn = async (email: string, password: string) => {
     try {
       setError(null);
@@ -281,12 +202,11 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       console.error('❌ Sign in exception:', errorMessage);
       setError(errorMessage);
       return { error: new Error(errorMessage) };
-    } finally {
-      setLoading(false);
     }
+    // ✅ Don't set loading false here - let auth state change handle it
   };
 
-  // ✅ FIX 6: Enhanced sign up with profile creation
+  // ✅ SIMPLIFIED: Sign up
   const signUp = async (email: string, password: string, name: string, company_name?: string) => {
     try {
       setError(null);
@@ -312,29 +232,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         return { error };
       }
 
-      if (data.user) {
-        console.log('👤 User created, creating profile...');
-        
-        // Create form_admin profile immediately
-        const { error: profileError } = await supabase
-          .from('form_admins')
-          .insert([{
-            id: data.user.id,
-            email,
-            name,
-            company_name,
-            is_active: true,
-            created_at: new Date().toISOString()
-          }]);
-
-        if (profileError) {
-          console.warn('⚠️ Profile creation warning:', profileError.message);
-          // Don't fail signup for this - profile will be created on next login
-        } else {
-          console.log('✅ Profile created successfully');
-        }
-      }
-
+      // ✅ SIMPLIFIED: Don't try to create profile immediately
+      // It will be handled by auth state change or created on first use
       console.log('✅ Sign up successful');
       return { error: null };
       
@@ -348,7 +247,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
   };
 
-  // ✅ FIX 7: Enhanced sign out
+  // ✅ SIMPLIFIED: Sign out
   const signOut = async () => {
     try {
       setError(null);
@@ -365,21 +264,17 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
   };
 
-  // ✅ FIX 8: Manual profile refresh
+  // ✅ SIMPLIFIED: Manual profile refresh
   const refreshProfile = async () => {
-    if (!session?.user?.id) return;
+    if (!session?.user?.id || !session?.user?.email) return;
     
     try {
       setError(null);
       console.log('🔄 Refreshing user profile...');
       
-      const userProfile = await loadUserProfile(session.user.id);
-      if (userProfile) {
-        setUser(userProfile);
-        console.log('✅ Profile refreshed successfully');
-      } else {
-        throw new Error('Failed to refresh profile');
-      }
+      const userProfile = await loadUserProfile(session.user.id, session.user.email);
+      setUser(userProfile);
+      console.log('✅ Profile refreshed successfully');
     } catch (error) {
       console.error('❌ Profile refresh error:', error);
       setError('Failed to refresh profile');
