@@ -267,8 +267,18 @@ async function logTransactionToDatabase(orderId, cashfreeOrder, orderDetails) {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     
-    // ✅ Resolve admin ID using our enhanced strategy
-    const adminId = await resolveAdminId(orderDetails);
+// ✅ FIX: Define orderDetails before using it
+const orderDetails = {
+  form_id, 
+  email, 
+  product_name, 
+  product_price, 
+  customer_name, 
+  customer_phone, 
+  form_admin_id
+};
+
+const adminId = await resolveAdminId(orderDetails);
     
     console.log('💾 Logging transaction with admin ID:', adminId);
 
@@ -316,18 +326,19 @@ async function logTransactionToDatabase(orderId, cashfreeOrder, orderDetails) {
       console.log('✅ Transaction logged successfully:', data?.[0]);
     }
 
-    // ✅ Also log to platform_commissions table for revenue tracking
-    const commissionData = {
-      transaction_id: data?.[0]?.id,
-      form_admin_id: adminId,
-      commission_amount: Number(platformCommission.toFixed(2)),
-      commission_rate: 3.0,
-      platform_fee: Number(platformCommission.toFixed(2)),
-      gateway_fee: Number(gatewayFee.toFixed(2)),
-      status: 'pending',
-      created_at: new Date().toISOString()
-    };
-
+// ✅ Also log to platform_commissions table for revenue tracking
+const commissionData = {
+  transaction_id: data?.[0]?.id,
+  form_admin_id: adminId,
+  commission_amount: Number(platformCommission.toFixed(2)),
+  commission_rate: 3.0,
+  platform_fee: Number(platformCommission.toFixed(2)),
+  gateway_fee: Number(gatewayFee.toFixed(2)),
+  net_amount_to_admin: Number(netAmountToAdmin.toFixed(2)), // ✅ ADD this missing field
+  status: 'pending',
+  created_at: new Date().toISOString()
+};
+    
     const { error: commissionError } = await supabase
       .from('platform_commissions')
       .insert([commissionData]);
