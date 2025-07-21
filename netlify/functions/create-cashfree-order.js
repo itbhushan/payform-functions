@@ -117,11 +117,11 @@ exports.handler = async (event, context) => {
 if (linkResponse.ok) {
   const linkResult = await linkResponse.json();
   console.log('✅ Payment link created:', linkResult.link_url);
-  
-  // ✅ ADD DATABASE LOGGING
-  await logTransactionToDatabase(orderId, cashfreeOrder, {
-    form_id, email, product_name, product_price, customer_name, customer_phone
-  });
+   
+// ✅ ADD DATABASE LOGGING
+await logTransactionToDatabase(orderId, cashfreeOrder, {
+  form_id, email, product_name, product_price, customer_name, customer_phone, form_admin_id
+});
   
   return {
     statusCode: 200,
@@ -135,10 +135,10 @@ if (linkResponse.ok) {
   };
 }
     // Final fallback
-    // ✅ ADD DATABASE LOGGING HERE TOO
-    await logTransactionToDatabase(orderId, cashfreeOrder, {
-      form_id, email, product_name, product_price, customer_name, customer_phone
-    });
+// ✅ ADD DATABASE LOGGING HERE TOO
+await logTransactionToDatabase(orderId, cashfreeOrder, {
+  form_id, email, product_name, product_price, customer_name, customer_phone, form_admin_id
+});
     
     return {
       statusCode: 200,
@@ -173,25 +173,33 @@ async function logTransactionToDatabase(orderId, cashfreeOrder, orderDetails) {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     
-    // Look up form admin from form_configs table
-    let adminId = 'f807a8c3-316b-4df0-90e7-5f7796c86f71'; // fallback for bhuvnagreens@gmail.com
-    try {
-      const { data: formConfig } = await supabase
-        .from('form_configs')
-        .select('admin_id')
-        .eq('form_id', orderDetails.form_id)
-        .single();
-      
-      if (formConfig?.admin_id) {
-        adminId = formConfig.admin_id;
-        console.log('✅ Found form admin:', adminId);
-      } else {
-        console.log('⚠️ Form config not found, using fallback admin ID');
-      }
-    } catch (formLookupError) {
-      console.warn('⚠️ Form lookup failed, using fallback admin ID:', formLookupError.message);
-    }
+// ✅ PRIORITY 1: Use admin ID sent from Google Apps Script (most reliable)
+let adminId = orderDetails.form_admin_id;
 
+if (adminId) {
+  console.log('✅ Using admin ID from Google Apps Script:', adminId);
+} else {
+  console.log('⚠️ No admin ID sent from Google Apps Script, looking up in database...');
+  
+  // FALLBACK 1: Look up form admin from form_configs table
+  adminId = 'f807a8c3-316b-4df0-90e7-5f7796c86f71'; // final fallback
+  try {
+    const { data: formConfig } = await supabase
+      .from('form_configs')
+      .select('admin_id')
+      .eq('form_id', orderDetails.form_id)
+      .single();
+    
+    if (formConfig?.admin_id) {
+      adminId = formConfig.admin_id;
+      console.log('✅ Found form admin in database:', adminId);
+    } else {
+      console.log('⚠️ Form config not found, using fallback admin ID');
+    }
+  } catch (formLookupError) {
+    console.warn('⚠️ Form lookup failed, using fallback admin ID:', formLookupError.message);
+  }
+}
     // Calculate commission split
     const totalAmount = parseFloat(orderDetails.product_price);
     const gatewayFee = (totalAmount * 2.5 / 100) + 3; // Cashfree: 2.5% + ₹3
