@@ -161,16 +161,24 @@ console.log('🔍 DEBUG: Stats calculated:', {
   pendingTransactions,
   totalEarnings
 });      
-      const stats: DashboardStats = {
-        totalSales,
-        totalTransactions: allTransactions.length,
-        completedTransactions,
-        pendingTransactions,
-        totalEarnings
-      };
+    
+const stats: DashboardStats = {
+  totalSales,
+  totalTransactions: allTransactions.length,
+  completedTransactions,
+  pendingTransactions,
+  totalEarnings
+};
 
-      setData(stats);
-      
+console.log('✅ SETTING NEW STATS:', stats);
+console.log('✅ SETTING NEW TRANSACTIONS:', allTransactions.length);
+
+// Force new object references to trigger re-render
+setData({ ...stats });
+setTransactions([...allTransactions]);
+
+console.log('✅ STATE UPDATE COMPLETE');    
+    
 } catch (err: any) {
   if (err.name === 'AbortError') {
     console.log('Dashboard request cancelled');
