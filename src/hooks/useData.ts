@@ -204,11 +204,7 @@ console.log('✅ STATE UPDATE COMPLETE');
 
 // Fix the useEffect in useDashboardData:
 useEffect(() => {
-  const timeoutId = setTimeout(() => {
-    fetchData(); // ✅ Call fetchData instead of fetchAdmin
-  }, 300);
-
-  return () => clearTimeout(timeoutId);
+  fetchData();
 }, [adminId]);
   
   return {
