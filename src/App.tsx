@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import type { ReactNode } from 'react';
 import { MyForms } from './components/dashboard/MyForms';
 import { AuthProvider, useAuth } from './hooks/useAuth';
-import { RegisterPage } from './components/auth/RegisterPage';
+//import { RegisterPage } from './components/auth/RegisterPage';
 //import DebugDashboard from './components/DebugDashboard';
 import { 
   useDashboardData, 
@@ -151,9 +151,104 @@ const LoginPage: React.FC = () => {
             </form>
           </div>
         ) : (
-          <RegisterPage onSwitchToLogin={() => setActiveTab('login')} />
+          <SimpleRegisterForm onSwitchToLogin={() => setActiveTab('login')} />
         )}
       </div>
+    </div>
+  );
+};
+
+// Simple Register Form Component (temporary replacement)
+const SimpleRegisterForm: React.FC<{ onSwitchToLogin: () => void }> = ({ onSwitchToLogin }) => {
+  const { signUp } = useAuth();
+  const [formData, setFormData] = useState({
+    email: '',
+    password: '',
+    name: '',
+    company_name: ''
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+
+    const { error } = await signUp(formData.email, formData.password, formData.name, formData.company_name);
+    if (error) {
+      setError(error.message);
+    } else {
+      alert('Account created! Please check your email to verify your account.');
+      onSwitchToLogin();
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div>
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+          <p className="text-red-800 text-sm">{error}</p>
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
+          <input
+            type="text"
+            value={formData.name}
+            onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            placeholder="Enter your full name"
+            required
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Company Name</label>
+          <input
+            type="text"
+            value={formData.company_name}
+            onChange={(e) => setFormData(prev => ({ ...prev, company_name: e.target.value }))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            placeholder="Your company (optional)"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Email Address *</label>
+          <input
+            type="email"
+            value={formData.email}
+            onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            placeholder="Enter your email"
+            required
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Password *</label>
+          <input
+            type="password"
+            value={formData.password}
+            onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            placeholder="Create a password"
+            required
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg font-medium transition-colors disabled:opacity-50"
+        >
+          {loading ? 'Creating Account...' : 'Create Account'}
+        </button>
+      </form>
     </div>
   );
 };
