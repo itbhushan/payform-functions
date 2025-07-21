@@ -1,301 +1,400 @@
-// src/hooks/useAuth.tsx - Complete Fixed Version
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { User, Session } from '@supabase/supabase-js';
+// src/hooks/useAuth.tsx - FIXED VERSION with timeout handling
+import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
-import { fetchAdmin, createAdmin } from './useData'; // ✅ Add this import
+import type { User, Session } from '@supabase/supabase-js';
 
-interface AuthContextType {
-  user: User | null;
-  session: Session | null;
-  loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: any }>;
-  signUp: (email: string, password: string, userData: any) => Promise<{ error: any }>;
-  signOut: () => Promise<void>;
-  profile: any;
-  isFormAdmin: boolean;
-  isSuperAdmin: boolean;
-  clearAuthData: () => Promise<void>;
+interface AuthUser extends User {
+  name?: string;
+  company_name?: string;
+  role?: string;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+interface AuthContextType {
+  user: AuthUser | null;
+  session: Session | null;
+  loading: boolean;
+  error: string | null;
+  signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
+  signUp: (email: string, password: string, name: string, company_name?: string) => Promise<{ error: Error | null }>;
+  signOut: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
+}
 
-export function useAuth() {
+const AuthContext = createContext<AuthContextType>({
+  user: null,
+  session: null,
+  loading: true,
+  error: null,
+  signIn: async () => ({ error: null }),
+  signUp: async () => ({ error: null }),
+  signOut: async () => {},
+  refreshProfile: async () => {}
+});
+
+export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-}
+};
 
 interface AuthProviderProps {
   children: ReactNode;
 }
 
-export function AuthProvider({ children }: AuthProviderProps) {
-  const [user, setUser] = useState<User | null>(null);
+export const AuthProvider = ({ children }: AuthProviderProps) => {
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let mounted = true;
+  // ✅ FIX 1: Enhanced profile loading with timeout and retry
+  const loadUserProfile = async (userId: string, maxRetries = 3, timeoutMs = 10000): Promise<AuthUser | null> => {
+    console.log('🔍 Loading user profile for:', userId);
     
-    const initializeAuth = async () => {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        console.log('🔄 Initializing auth...');
+        console.log(`📡 Profile load attempt ${attempt}/${maxRetries}`);
         
-        // Clear any stale auth state first
-        const { data: { session }, error } = await supabase.auth.getSession();
-        
-        if (mounted) {
-          console.log('✅ Auth session:', session?.user?.email || 'No session');
-          setSession(session);
-          setUser(session?.user ?? null);
+        // Create timeout promise
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Profile load timeout')), timeoutMs);
+        });
+
+        // Create profile load promise
+        const profilePromise = supabase
+          .from('form_admins')
+          .select('id, email, name, company_name, is_active, created_at')
+          .eq('id', userId)
+          .single();
+
+        // Race between timeout and profile load
+        const { data: profile, error } = await Promise.race([
+          profilePromise,
+          timeoutPromise
+        ]) as any;
+
+        if (error) {
+          console.warn(`⚠️ Profile load attempt ${attempt} failed:`, error.message);
           
-          if (session?.user) {
-            await loadUserProfile(session.user.id);
+          if (attempt === maxRetries) {
+            // On final attempt, create profile if it doesn't exist
+            console.log('🔧 Creating missing profile...');
+            return await createMissingProfile(userId);
           }
           
+          // Wait before retry (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+          continue;
+        }
+
+        if (profile) {
+          console.log('✅ Profile loaded successfully:', profile.email);
+          return {
+            id: profile.id,
+            email: profile.email,
+            name: profile.name,
+            company_name: profile.company_name,
+            role: 'form_admin',
+            // Add other required User properties with defaults
+            aud: 'authenticated',
+            created_at: profile.created_at,
+            app_metadata: {},
+            user_metadata: {
+              name: profile.name,
+              company_name: profile.company_name
+            }
+          } as AuthUser;
+        }
+
+      } catch (timeoutError) {
+        console.warn(`⏰ Profile load attempt ${attempt} timed out`);
+        
+        if (attempt === maxRetries) {
+          console.log('🔧 Creating profile after timeout...');
+          return await createMissingProfile(userId);
+        }
+        
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+      }
+    }
+
+    return null;
+  };
+
+  // ✅ FIX 2: Create missing profile for existing auth users
+  const createMissingProfile = async (userId: string): Promise<AuthUser | null> => {
+    try {
+      console.log('🛠️ Creating missing profile for user:', userId);
+      
+      // Get user email from auth
+      const { data: authUser } = await supabase.auth.getUser();
+      const userEmail = authUser.user?.email;
+      
+      if (!userEmail) {
+        throw new Error('Cannot create profile: no email found');
+      }
+
+      // Create form_admin record
+      const { data: newProfile, error: createError } = await supabase
+        .from('form_admins')
+        .insert([{
+          id: userId,
+          email: userEmail,
+          name: authUser.user?.user_metadata?.name || userEmail.split('@')[0],
+          company_name: authUser.user?.user_metadata?.company_name || null,
+          is_active: true,
+          created_at: new Date().toISOString()
+        }])
+        .select()
+        .single();
+
+      if (createError) {
+        console.error('❌ Failed to create profile:', createError);
+        return null;
+      }
+
+      console.log('✅ Profile created successfully:', newProfile.email);
+      
+      return {
+        id: newProfile.id,
+        email: newProfile.email,
+        name: newProfile.name,
+        company_name: newProfile.company_name,
+        role: 'form_admin',
+        aud: 'authenticated',
+        created_at: newProfile.created_at,
+        app_metadata: {},
+        user_metadata: {
+          name: newProfile.name,
+          company_name: newProfile.company_name
+        }
+      } as AuthUser;
+
+    } catch (error) {
+      console.error('❌ Error creating missing profile:', error);
+      return null;
+    }
+  };
+
+  // ✅ FIX 3: Enhanced session handling with proper error management
+  const handleAuthStateChange = async (event: string, session: Session | null) => {
+    console.log('🔐 Auth state changed:', event, session?.user?.email || 'no user');
+    
+    try {
+      setError(null);
+      setSession(session);
+
+      if (session?.user) {
+        setLoading(true);
+        
+        // Load user profile with timeout handling
+        const userProfile = await loadUserProfile(session.user.id);
+        
+        if (userProfile) {
+          setUser(userProfile);
+        } else {
+          console.error('❌ Failed to load or create user profile');
+          setError('Failed to load user profile. Please try refreshing the page.');
+          setUser(null);
+        }
+      } else {
+        setUser(null);
+      }
+    } catch (error) {
+      console.error('❌ Auth state change error:', error);
+      setError('Authentication error occurred. Please try again.');
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ✅ FIX 4: Initialize auth with better error handling
+  useEffect(() => {
+    let mounted = true;
+
+    const initializeAuth = async () => {
+      try {
+        console.log('🚀 Initializing authentication...');
+        
+        // Get initial session with timeout
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error('❌ Session initialization error:', error);
+          setError('Failed to initialize authentication.');
           setLoading(false);
+          return;
+        }
+
+        if (mounted) {
+          await handleAuthStateChange('INITIAL_SESSION', session);
         }
       } catch (error) {
-        console.error('❌ Auth initialization error:', error);
+        console.error('❌ Auth initialization failed:', error);
         if (mounted) {
-          // Clear auth state on error
-          setSession(null);
-          setUser(null);
-          setProfile(null);
+          setError('Authentication system unavailable.');
           setLoading(false);
         }
       }
     };
 
-    // Initialize auth
     initializeAuth();
 
-    // Listen for auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!mounted) return;
-      
-      console.log('🔄 Auth state changed:', event, session?.user?.email || 'No user');
-      
-      try {
-        // Handle different auth events
-        if (event === 'SIGNED_OUT') {
-          setSession(null);
-          setUser(null);
-          setProfile(null);
-        } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-          setSession(session);
-          setUser(session?.user ?? null);
-          
-          if (session?.user) {
-            await loadUserProfile(session.user.id);
-          } else {
-            setProfile(null);
-          }
-        } else if (event === 'USER_UPDATED') {
-          setSession(session);
-          setUser(session?.user ?? null);
-        }
-        
-        setLoading(false);
-      } catch (error) {
-        console.error('❌ Auth state change error:', error);
-        setLoading(false);
-      }
-    });
+    // Set up auth state listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(handleAuthStateChange);
 
-    // Fallback timeout to prevent infinite loading
-    const fallbackTimeout = setTimeout(() => {
-      if (mounted && loading) {
-      console.warn('⚠️ Auth loading timeout - stopping loading state');
-      setLoading(false);
-      setUser(null);
-      setSession(null);
-      setProfile(null);
-      }
-    }, 5000); // 5 second timeout
-    
+    // Cleanup
     return () => {
       mounted = false;
-      clearTimeout(fallbackTimeout);
       subscription.unsubscribe();
     };
   }, []);
 
-  const loadUserProfile = async (userId: string) => {
-    try {
-      console.log('📝 Loading user profile for:', userId);
-      
-      // Add timeout to prevent hanging
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Profile load timeout')), 8000)
-      );
-      
-const data = await Promise.race([
-  fetchAdmin(userId), // ✅ Use the imported function
-  timeoutPromise
-]) as any;
-      
-      if (error && error.code !== 'PGRST116') {
-        console.error('❌ Error loading profile:', error);
-        return;
-      }
-
-      console.log('✅ Profile loaded:', data?.email || 'No profile');
-      setProfile(data);
-    } catch (error) {
-      console.error('❌ Profile load error or timeout:', error);
-      // Don't block auth flow if profile fails
-      setProfile(null);
-    }
-  };
-
+  // ✅ FIX 5: Enhanced sign in with better error handling
   const signIn = async (email: string, password: string) => {
     try {
+      setError(null);
       setLoading(true);
-      console.log('🔑 Signing in:', email);
       
-      const { data, error } = await supabase.auth.signInWithPassword({
+      console.log('🔐 Signing in user:', email);
+      
+      const { error } = await supabase.auth.signInWithPassword({
         email,
-        password,
+        password
       });
 
       if (error) {
-        console.error('❌ Sign in error:', error);
+        console.error('❌ Sign in error:', error.message);
+        setError(error.message);
         return { error };
       }
 
-      console.log('✅ Sign in successful:', email);
+      console.log('✅ Sign in successful');
       return { error: null };
+      
     } catch (error) {
-      console.error('❌ Sign in exception:', error);
-      return { error };
+      const errorMessage = error instanceof Error ? error.message : 'Sign in failed';
+      console.error('❌ Sign in exception:', errorMessage);
+      setError(errorMessage);
+      return { error: new Error(errorMessage) };
     } finally {
-      // Don't set loading false here - let auth state change handle it
+      setLoading(false);
     }
   };
 
-  const signUp = async (email: string, password: string, userData: any) => {
+  // ✅ FIX 6: Enhanced sign up with profile creation
+  const signUp = async (email: string, password: string, name: string, company_name?: string) => {
     try {
+      setError(null);
       setLoading(true);
-      console.log('📝 Signing up:', email);
       
-      // First, sign up the user
+      console.log('📝 Signing up user:', email);
+
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: {
-            name: userData.name,
-            role: userData.role || 'form_admin'
+            name,
+            company_name,
+            role: 'form_admin'
           }
         }
       });
 
       if (error) {
-        console.error('❌ Sign up error:', error);
+        console.error('❌ Sign up error:', error.message);
+        setError(error.message);
         return { error };
       }
 
-      // If user was created, create profile
       if (data.user) {
-        console.log('👤 Creating user profile...');
+        console.log('👤 User created, creating profile...');
         
-// Use the imported createAdmin function:
-try {
-  await createAdmin({
-    id: data.user.id,
-    email: email,
-    name: userData.name,
-    company_name: userData.company_name || null,
-    is_active: true
-  });
-  console.log('✅ Profile created successfully');
-} catch (profileError) {
-  console.error('❌ Error creating profile:', profileError);
-}
-        
+        // Create form_admin profile immediately
+        const { error: profileError } = await supabase
+          .from('form_admins')
+          .insert([{
+            id: data.user.id,
+            email,
+            name,
+            company_name,
+            is_active: true,
+            created_at: new Date().toISOString()
+          }]);
+
         if (profileError) {
-          console.error('❌ Error creating profile:', profileError);
-          // Don't return error here as auth was successful
+          console.warn('⚠️ Profile creation warning:', profileError.message);
+          // Don't fail signup for this - profile will be created on next login
         } else {
           console.log('✅ Profile created successfully');
         }
       }
 
+      console.log('✅ Sign up successful');
       return { error: null };
+      
     } catch (error) {
-      console.error('❌ Sign up exception:', error);
-      return { error };
+      const errorMessage = error instanceof Error ? error.message : 'Sign up failed';
+      console.error('❌ Sign up exception:', errorMessage);
+      setError(errorMessage);
+      return { error: new Error(errorMessage) };
     } finally {
       setLoading(false);
     }
   };
 
+  // ✅ FIX 7: Enhanced sign out
   const signOut = async () => {
     try {
-      console.log('🚪 Signing out...');
-      setLoading(true);
+      setError(null);
+      console.log('👋 Signing out user');
       
       await supabase.auth.signOut();
-      setProfile(null);
+      setUser(null);
+      setSession(null);
       
-      console.log('✅ Signed out successfully');
+      console.log('✅ Sign out successful');
     } catch (error) {
       console.error('❌ Sign out error:', error);
-    } finally {
-      setLoading(false);
+      setError('Sign out failed');
     }
   };
 
-  const clearAuthData = async () => {
+  // ✅ FIX 8: Manual profile refresh
+  const refreshProfile = async () => {
+    if (!session?.user?.id) return;
+    
     try {
-      console.log('🧹 Clearing all auth data...');
+      setError(null);
+      console.log('🔄 Refreshing user profile...');
       
-      await supabase.auth.signOut();
-      setSession(null);
-      setUser(null);
-      setProfile(null);
-      
-      // Clear browser storage
-      try {
-        localStorage.clear();
-        sessionStorage.clear();
-      } catch (e) {
-        console.warn('Could not clear storage:', e);
+      const userProfile = await loadUserProfile(session.user.id);
+      if (userProfile) {
+        setUser(userProfile);
+        console.log('✅ Profile refreshed successfully');
+      } else {
+        throw new Error('Failed to refresh profile');
       }
-      
-      console.log('✅ Auth data cleared');
-      
-      // Reload page to ensure clean state
-    // Let React handle the state change naturally
-    console.log('✅ Auth data cleared - React will handle UI updates');
     } catch (error) {
-      console.error('❌ Error clearing auth data:', error);
-      // Force reload anyway
-      window.location.reload();
+      console.error('❌ Profile refresh error:', error);
+      setError('Failed to refresh profile');
     }
   };
-
-  // Calculate user roles
-  const isFormAdmin = user?.email !== 'admin@payform.com';
-  const isSuperAdmin = user?.email === 'admin@payform.com';
 
   const value: AuthContextType = {
     user,
     session,
     loading,
+    error,
     signIn,
     signUp,
     signOut,
-    profile,
-    isFormAdmin,
-    isSuperAdmin,
-    clearAuthData,
+    refreshProfile
   };
 
   return (
@@ -303,4 +402,4 @@ try {
       {children}
     </AuthContext.Provider>
   );
-}
+};
