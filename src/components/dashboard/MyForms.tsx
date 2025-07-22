@@ -416,11 +416,31 @@ const AddFormModal: React.FC<{ onClose: () => void; onSuccess: () => void }> = (
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const extractFormId = (url: string) => {
-    const match = url.match(/forms\/d\/([a-zA-Z0-9-_]+)/);
-    return match ? match[1] : null;
-  };
-
+const extractFormId = (url: string) => {
+  console.log('🔍 Extracting form ID from URL:', url);
+  
+  // ✅ Enhanced regex patterns for different Google Forms URL formats
+  const patterns = [
+    // Published form: /forms/d/e/LONG_ID/viewform
+    /forms\/d\/e\/([a-zA-Z0-9-_]{25,})/,
+    // Edit form: /forms/d/LONG_ID/edit  
+    /forms\/d\/([a-zA-Z0-9-_]{25,})\/edit/,
+    // General form: /forms/d/LONG_ID/
+    /forms\/d\/([a-zA-Z0-9-_]{25,})/
+  ];
+  
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match && match[1] && match[1].length >= 25) { // Google Form IDs are typically 25+ chars
+      console.log('✅ Extracted form ID:', match[1]);
+      return match[1];
+    }
+  }
+  
+  console.error('❌ Could not extract valid form ID from URL:', url);
+  return null;
+};
+  
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
