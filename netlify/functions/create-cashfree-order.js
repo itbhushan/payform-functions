@@ -13,7 +13,7 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    // ✅ FIX 1: Extract form_admin_id from request body
+    // ✅ Extract all required parameters from request body
     const { 
       form_id, 
       email, 
@@ -21,7 +21,7 @@ exports.handler = async (event, context) => {
       product_price, 
       customer_name = "Customer", 
       customer_phone = "9999999999",
-      form_admin_id  // ✅ CRITICAL: Extract admin ID sent from Google Apps Script
+      form_admin_id
     } = JSON.parse(event.body || '{}');
 
     console.log('📥 Request received:', {
@@ -32,6 +32,7 @@ exports.handler = async (event, context) => {
       form_admin_id: form_admin_id || 'NOT PROVIDED'
     });
 
+    // Validate required environment variables
     const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
     const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
 
@@ -39,9 +40,21 @@ exports.handler = async (event, context) => {
       throw new Error('Cashfree credentials not configured');
     }
 
+    // Generate unique order ID
     const orderId = `payform_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    // Step 1: Create Order
+    // ✅ Create orderDetails object early for consistent usage
+    const orderDetails = {
+      form_id, 
+      email, 
+      product_name, 
+      product_price, 
+      customer_name, 
+      customer_phone, 
+      form_admin_id
+    };
+
+    // Step 1: Create Cashfree Order
     const orderData = {
       order_id: orderId,
       order_amount: parseFloat(product_price),
@@ -142,16 +155,11 @@ exports.handler = async (event, context) => {
       checkoutUrl = `https://payments.cashfree.com/forms/${cashfreeOrder.payment_session_id.replace(/paymentpayment$/, '')}`;
     }
 
-    // ✅ FIX 2: Pass form_admin_id to database logging
-    await logTransactionToDatabase(orderId, cashfreeOrder, {
-      form_id, 
-      email, 
-      product_name, 
-      product_price, 
-      customer_name, 
-      customer_phone, 
-      form_admin_id  // ✅ CRITICAL: Pass admin ID to database function
-    });
+    // ✅ Resolve admin ID for database logging
+    const adminId = await resolveAdminId(orderDetails);
+
+    // ✅ Log transaction to database
+    await logTransactionToDatabase(orderId, cashfreeOrder, orderDetails, adminId);
 
     return {
       statusCode: 200,
@@ -161,7 +169,7 @@ exports.handler = async (event, context) => {
         order_id: orderId,
         cf_order_id: cashfreeOrder.cf_order_id,
         checkout_url: checkoutUrl,
-        admin_id_used: adminId // ✅ Use already resolved adminId
+        admin_id_used: adminId
       })
     };
 
@@ -179,7 +187,7 @@ exports.handler = async (event, context) => {
   }
 };
 
-// ✅ FIX 3: Enhanced Admin ID Resolution with Multiple Strategies
+// ✅ Enhanced Admin ID Resolution with Multiple Strategies
 async function resolveAdminId(orderDetails) {
   const { form_id, form_admin_id } = orderDetails;
   
@@ -254,8 +262,8 @@ async function resolveAdminId(orderDetails) {
   throw new Error(`Cannot resolve admin ID for form: ${form_id}. Please ensure the form is registered in PayForm dashboard.`);
 }
 
-// ✅ FIX 4: Enhanced Database Logging with Robust Admin ID Resolution
-async function logTransactionToDatabase(orderId, cashfreeOrder, orderDetails) {
+// ✅ Enhanced Database Logging with Proper Variable Management
+async function logTransactionToDatabase(orderId, cashfreeOrder, orderDetails, adminId) {
   try {
     const SUPABASE_URL = process.env.SUPABASE_URL;
     const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -267,20 +275,13 @@ async function logTransactionToDatabase(orderId, cashfreeOrder, orderDetails) {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     
-// ✅ FIX: Define orderDetails before using it
-const orderDetails = {
-  form_id, 
-  email, 
-  product_name, 
-  product_price, 
-  customer_name, 
-  customer_phone, 
-  form_admin_id
-};
-
-const adminId = await resolveAdminId(orderDetails);
-    
     console.log('💾 Logging transaction with admin ID:', adminId);
+    console.log('💾 Order details:', {
+      form_id: orderDetails.form_id,
+      email: orderDetails.email,
+      product_name: orderDetails.product_name,
+      amount: orderDetails.product_price
+    });
 
     // Calculate commission split
     const totalAmount = parseFloat(orderDetails.product_price);
@@ -303,15 +304,16 @@ const adminId = await resolveAdminId(orderDetails);
       gateway_fee: Number(gatewayFee.toFixed(2)),
       platform_commission: Number(platformCommission.toFixed(2)),
       net_amount_to_admin: Number(netAmountToAdmin.toFixed(2)),
-      admin_id: adminId, // ✅ Dynamically resolved admin ID
+      admin_id: adminId,
       created_at: new Date().toISOString()
     };
 
-    console.log('💾 Transaction data:', {
+    console.log('💾 Transaction data summary:', {
       transaction_id: orderId,
       admin_id: adminId,
       amount: totalAmount,
-      form_id: orderDetails.form_id
+      form_id: orderDetails.form_id,
+      net_amount_to_admin: Number(netAmountToAdmin.toFixed(2))
     });
 
     const { data, error: dbError } = await supabase
@@ -326,27 +328,29 @@ const adminId = await resolveAdminId(orderDetails);
       console.log('✅ Transaction logged successfully:', data?.[0]);
     }
 
-// ✅ Also log to platform_commissions table for revenue tracking
-const commissionData = {
-  transaction_id: data?.[0]?.id,
-  form_admin_id: adminId,
-  commission_amount: Number(platformCommission.toFixed(2)),
-  commission_rate: 3.0,
-  platform_fee: Number(platformCommission.toFixed(2)),
-  gateway_fee: Number(gatewayFee.toFixed(2)),
-  net_amount_to_admin: Number(netAmountToAdmin.toFixed(2)), // ✅ ADD this missing field
-  status: 'pending',
-  created_at: new Date().toISOString()
-};
-    
-    const { error: commissionError } = await supabase
-      .from('platform_commissions')
-      .insert([commissionData]);
+    // ✅ Log to platform_commissions table for revenue tracking
+    if (data?.[0]?.id) {
+      const commissionData = {
+        transaction_id: data[0].id,
+        form_admin_id: adminId,
+        commission_amount: Number(platformCommission.toFixed(2)),
+        commission_rate: 3.0,
+        platform_fee: Number(platformCommission.toFixed(2)),
+        gateway_fee: Number(gatewayFee.toFixed(2)),
+        net_amount_to_admin: Number(netAmountToAdmin.toFixed(2)),
+        status: 'pending',
+        created_at: new Date().toISOString()
+      };
 
-    if (commissionError) {
-      console.error('⚠️ Commission logging error:', commissionError);
-    } else {
-      console.log('✅ Commission logged successfully');
+      const { error: commissionError } = await supabase
+        .from('platform_commissions')
+        .insert([commissionData]);
+
+      if (commissionError) {
+        console.error('⚠️ Commission logging error:', commissionError);
+      } else {
+        console.log('✅ Commission logged successfully');
+      }
     }
 
   } catch (error) {
