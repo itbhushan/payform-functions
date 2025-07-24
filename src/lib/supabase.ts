@@ -174,6 +174,35 @@ export interface CashfreePaymentResponse {
   payment_time: string;
 }
 
+// ADD these new interfaces after the existing ones:
+export interface FormFieldMapping {
+  id: string;
+  form_id: string;
+  admin_id: string;
+  email_field_id?: string;
+  product_field_id?: string;
+  name_field_id?: string;
+  phone_field_id?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GoogleFormQuestion {
+  questionId: string;
+  title: string;
+  type: string;
+  required: boolean;
+  description?: string;
+  choices?: string[];
+}
+
+export interface GoogleFormStructure {
+  formId: string;
+  title: string;
+  description?: string;
+  questions: GoogleFormQuestion[];
+}
+
 // Utility Functions
 export const testSupabaseConnection = async () => {
   try {
@@ -225,4 +254,60 @@ export const formatDate = (dateString: string) => {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(dateString));
+};
+
+// ADD these new utility functions:
+// Fetch Google Form structure via our API
+export const fetchGoogleFormStructure = async (formId: string): Promise<GoogleFormStructure | null> => {
+  try {
+    const response = await fetch('/.netlify/functions/google-forms-api', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'getFormStructure', formId })
+    });
+    
+    const result = await response.json();
+    return result.success ? result.data : null;
+  } catch (error) {
+    console.error('Error fetching form structure:', error);
+    return null;
+  }
+};
+
+// Test Google Form access
+export const testGoogleFormAccess = async (formId: string): Promise<boolean> => {
+  try {
+    const response = await fetch('/.netlify/functions/google-forms-api', {
+      method: 'POST',  
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'testFormAccess', formId })
+    });
+    
+    const result = await response.json();
+    return result.success;
+  } catch (error) {
+    console.error('Error testing form access:', error);
+    return false;
+  }
+};
+
+// Extract Google Form ID from various URL formats
+export const extractGoogleFormId = (url: string): string | null => {
+  const patterns = [
+    // Published form: /forms/d/e/LONG_ID/viewform
+    /forms\/d\/e\/([a-zA-Z0-9-_]{25,})/,
+    // Edit form: /forms/d/LONG_ID/edit  
+    /forms\/d\/([a-zA-Z0-9-_]{25,})\/edit/,
+    // General form: /forms/d/LONG_ID/
+    /forms\/d\/([a-zA-Z0-9-_]{25,})/
+  ];
+  
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match && match[1] && match[1].length >= 25) {
+      return match[1];
+    }
+  }
+  
+  return null;
 };
