@@ -2,6 +2,13 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
+// ADD these imports after your existing imports:
+import { 
+  fetchGoogleFormStructure, 
+  testGoogleFormAccess, 
+  extractGoogleFormId 
+} from '../../lib/supabase';
+import { useGoogleFormIntegration } from '../../hooks/useData';
 
 interface FormConfig {
   id: string;
@@ -406,46 +413,35 @@ const FormCard: React.FC<{
   );
 };
 
-// ✅ FIX 3: Simplified Add Form Modal (no products configuration)
+// REPLACE the existing AddFormModal component in MyForms.tsx with this:
+
 const AddFormModal: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ onClose, onSuccess }) => {
   const { user } = useAuth();
+  const { saveFieldMapping } = useGoogleFormIntegration(user?.id);
+  
+  // Form state
+  const [step, setStep] = useState<'url' | 'mapping' | 'review'>('url');
   const [formData, setFormData] = useState({
     form_url: '',
     form_name: ''
   });
+  const [formStructure, setFormStructure] = useState<any>(null);
+  const [fieldMappings, setFieldMappings] = useState({
+    emailField: '',
+    productField: '',
+    nameField: '',
+    phoneField: ''
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-const extractFormId = (url: string) => {
-  console.log('🔍 Extracting form ID from URL:', url);
-  
-  // ✅ Enhanced regex patterns for different Google Forms URL formats
-  const patterns = [
-    // Published form: /forms/d/e/LONG_ID/viewform
-    /forms\/d\/e\/([a-zA-Z0-9-_]{25,})/,
-    // Edit form: /forms/d/LONG_ID/edit  
-    /forms\/d\/([a-zA-Z0-9-_]{25,})\/edit/,
-    // General form: /forms/d/LONG_ID/
-    /forms\/d\/([a-zA-Z0-9-_]{25,})/
-  ];
-  
-  for (const pattern of patterns) {
-    const match = url.match(pattern);
-    if (match && match[1] && match[1].length >= 25) { // Google Form IDs are typically 25+ chars
-      console.log('✅ Extracted form ID:', match[1]);
-      return match[1];
-    }
-  }
-  
-  console.error('❌ Could not extract valid form ID from URL:', url);
-  return null;
-};
-  
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Step 1: Analyze Google Form URL
+  const handleUrlSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     
-    const formId = extractFormId(formData.form_url);
+    // Extract form ID from URL
+    const formId = extractGoogleFormId(formData.form_url);
     if (!formId) {
       setError('Invalid Google Form URL. Please check the URL format.');
       return;
@@ -467,49 +463,113 @@ const extractFormId = (url: string) => {
         return;
       }
 
-      // Insert form config
-      const { error: formError } = await supabase
-        .from('form_configs')
-        .insert({
-          form_id: formId,
-          admin_id: user?.id,
-          form_name: formData.form_name,
-          form_url: formData.form_url,
-          is_active: true,
-          payment_settings: {
-            currency: 'INR'
-          }
-        });
+      // Test form access
+      const hasAccess = await testGoogleFormAccess(formId);
+      if (!hasAccess) {
+        setError('Cannot access this form. Please check the URL and permissions.');
+        setLoading(false);
+        return;
+      }
 
-      if (formError) throw formError;
+      // Get form structure
+      const structure = await fetchGoogleFormStructure(formId);
+      if (!structure) {
+        setError('Failed to analyze form structure. Please try again.');
+        setLoading(false);
+        return;
+      }
 
-      // Insert basic payment config for backward compatibility
-      const { error: paymentError } = await supabase
-        .from('payment_configs')
-        .insert({
-          form_id: formId,
-          admin_id: user?.id,
-          form_name: formData.form_name,
-          currency: 'INR',
-          is_active: true
-        });
-
-      if (paymentError) throw paymentError;
-
-      onSuccess();
+      setFormStructure(structure);
+      setStep('mapping');
+      
     } catch (error) {
-      console.error('Error saving form:', error);
-      setError('Error saving form. Please try again.');
+      console.error('Error analyzing form:', error);
+      setError('Error analyzing form. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
+  // Step 2: Save field mappings and form
+  const handleMappingSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+
+    // Validate required mappings
+    if (!fieldMappings.emailField || !fieldMappings.productField) {
+      setError('Email and Product fields are required.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const formId = extractGoogleFormId(formData.form_url)!;
+
+      // Save form config
+      const { error: formError } = await supabase
+        .from('form_configs')
+        .insert({
+          form_id: formId,
+          admin_id: user?.id,
+          form_name: formData.form_name || formStructure.title,
+          form_url: formData.form_url,
+          is_active: true,
+          payment_settings: {
+            currency: 'INR',
+            integration_type: 'google_forms_api'
+          }
+        });
+
+      if (formError) throw formError;
+
+      // Save field mappings
+      const mappingResult = await saveFieldMapping(formId, fieldMappings);
+      if (!mappingResult.success) {
+        throw new Error(mappingResult.error);
+      }
+
+      // Save payment config for backward compatibility
+      await supabase
+        .from('payment_configs')
+        .insert({
+          form_id: formId,
+          admin_id: user?.id,
+          form_name: formData.form_name || formStructure.title,
+          currency: 'INR',
+          is_active: true
+        });
+
+      setStep('review');
+      
+    } catch (error: any) {
+      console.error('Error saving form:', error);
+      setError('Error saving form. Please try again.');
+      setLoading(false);
+    }
+  };
+
+  // Step 3: Complete setup
+  const handleComplete = () => {
+    onSuccess();
+  };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        
+        {/* Header */}
         <div className="flex justify-between items-center mb-6">
-          <h3 className="text-lg font-medium text-gray-900">Connect New Google Form</h3>
+          <div>
+            <h3 className="text-lg font-medium text-gray-900">Connect Google Form</h3>
+            <div className="flex items-center mt-2 space-x-2">
+              <div className={`w-2 h-2 rounded-full ${step === 'url' ? 'bg-blue-500' : 'bg-green-500'}`}></div>
+              <span className="text-xs text-gray-500">URL Analysis</span>
+              <div className={`w-2 h-2 rounded-full ${step === 'mapping' ? 'bg-blue-500' : step === 'review' ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+              <span className="text-xs text-gray-500">Field Mapping</span>
+              <div className={`w-2 h-2 rounded-full ${step === 'review' ? 'bg-blue-500' : 'bg-gray-300'}`}></div>
+              <span className="text-xs text-gray-500">Complete</span>
+            </div>
+          </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <span className="text-2xl">×</span>
           </button>
@@ -521,63 +581,227 @@ const extractFormId = (url: string) => {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Google Form URL *
-            </label>
-            <input
-              type="url"
-              value={formData.form_url}
-              onChange={(e) => setFormData(prev => ({ ...prev, form_url: e.target.value }))}
-              placeholder="https://docs.google.com/forms/d/YOUR_FORM_ID/edit"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-              required
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              Copy the URL from your Google Form edit page
-            </p>
-          </div>
+        {/* Step 1: URL Input */}
+        {step === 'url' && (
+          <form onSubmit={handleUrlSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Google Form URL *
+              </label>
+              <input
+                type="url"
+                value={formData.form_url}
+                onChange={(e) => setFormData(prev => ({ ...prev, form_url: e.target.value }))}
+                placeholder="https://docs.google.com/forms/d/YOUR_FORM_ID/edit"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                required
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Copy the URL from your Google Form (edit or view mode)
+              </p>
+            </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Form Name *
-            </label>
-            <input
-              type="text"
-              value={formData.form_name}
-              onChange={(e) => setFormData(prev => ({ ...prev, form_name: e.target.value }))}
-              placeholder="e.g., Course Registration Form"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-              required
-            />
-          </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Form Name (Optional)
+              </label>
+              <input
+                type="text"
+                value={formData.form_name}
+                onChange={(e) => setFormData(prev => ({ ...prev, form_name: e.target.value }))}
+                placeholder="Will auto-detect from form if empty"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
 
-          {/* ✅ FIX 3: Added explanation about products */}
-          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-            <p className="text-sm text-blue-800">
-              <strong>💡 Note:</strong> Product details and pricing will be automatically extracted from your form responses. 
-              Make sure your form includes a field with format like "Course - ₹2999".
-            </p>
-          </div>
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-800">
+                <strong>🔍 What happens next:</strong> We'll analyze your form structure and help you map fields for automatic payment processing.
+              </p>
+            </div>
 
-          <div className="flex justify-end space-x-3 pt-4 border-t">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-            >
-              {loading ? 'Connecting...' : 'Connect Form'}
-            </button>
+            <div className="flex justify-end space-x-3 pt-4 border-t">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+              >
+                {loading ? 'Analyzing...' : 'Analyze Form →'}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Step 2: Field Mapping */}
+        {step === 'mapping' && formStructure && (
+          <form onSubmit={handleMappingSubmit} className="space-y-6">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <h4 className="font-medium text-green-900 mb-2">✅ Form Analysis Complete</h4>
+              <p className="text-sm text-green-800">
+                <strong>Form:</strong> {formStructure.title}<br/>
+                <strong>Questions Found:</strong> {formStructure.questions?.length || 0}
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <h4 className="font-medium text-gray-900">Map Form Fields to Payment Data</h4>
+              <p className="text-sm text-gray-600">
+                Select which form questions correspond to payment information:
+              </p>
+
+              {/* Email Field Mapping */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Email Field * <span className="text-red-500">(Required)</span>
+                </label>
+                <select
+                  value={fieldMappings.emailField}
+                  onChange={(e) => setFieldMappings(prev => ({ ...prev, emailField: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                  required
+                >
+                  <option value="">Select email field...</option>
+                  {formStructure.questions?.map((q: any) => (
+                    <option key={q.questionId} value={q.questionId}>
+                      {q.title} {q.required ? '(Required)' : '(Optional)'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Product Field Mapping */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Product/Amount Field * <span className="text-red-500">(Required)</span>
+                </label>
+                <select
+                  value={fieldMappings.productField}
+                  onChange={(e) => setFieldMappings(prev => ({ ...prev, productField: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                  required
+                >
+                  <option value="">Select product field...</option>
+                  {formStructure.questions?.map((q: any) => (
+                    <option key={q.questionId} value={q.questionId}>
+                      {q.title} {q.required ? '(Required)' : '(Optional)'}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Field should contain format like "Course - ₹2999" or "Premium Package - ₹5000"
+                </p>
+              </div>
+
+              {/* Name Field Mapping */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Customer Name Field (Recommended)
+                </label>
+                <select
+                  value={fieldMappings.nameField}
+                  onChange={(e) => setFieldMappings(prev => ({ ...prev, nameField: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">Select name field...</option>
+                  {formStructure.questions?.map((q: any) => (
+                    <option key={q.questionId} value={q.questionId}>
+                      {q.title} {q.required ? '(Required)' : '(Optional)'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Phone Field Mapping */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Phone Number Field (Optional)
+                </label>
+                <select
+                  value={fieldMappings.phoneField}
+                  onChange={(e) => setFieldMappings(prev => ({ ...prev, phoneField: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">Select phone field...</option>
+                  {formStructure.questions?.map((q: any) => (
+                    <option key={q.questionId} value={q.questionId}>
+                      {q.title} {q.required ? '(Required)' : '(Optional)'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <p className="text-sm text-yellow-800">
+                <strong>💡 Tip:</strong> After mapping, we'll automatically monitor your form for new submissions and send payment links within 60 seconds.
+              </p>
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-4 border-t">
+              <button
+                type="button"
+                onClick={() => setStep('url')}
+                className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
+              >
+                ← Back
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+              >
+                {loading ? 'Saving...' : 'Save & Activate →'}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Step 3: Success/Review */}
+        {step === 'review' && (
+          <div className="space-y-6">
+            <div className="text-center py-8">
+              <div className="text-6xl mb-4">🎉</div>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Form Connected Successfully!</h3>
+              <p className="text-gray-600">Your Google Form is now integrated with PayForm.</p>
+            </div>
+
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <h4 className="font-medium text-green-900 mb-3">✅ What's Activated:</h4>
+              <ul className="space-y-2 text-sm text-green-800">
+                <li>• <strong>Automatic Monitoring:</strong> We check for new responses every 60 seconds</li>
+                <li>• <strong>Payment Processing:</strong> Cashfree orders created automatically</li>
+                <li>• <strong>Email Notifications:</strong> Payment links sent to customers instantly</li>
+                <li>• <strong>Dashboard Tracking:</strong> All transactions appear in your dashboard</li>
+              </ul>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h4 className="font-medium text-blue-900 mb-2">🧪 How to Test:</h4>
+              <ol className="space-y-1 text-sm text-blue-800 list-decimal list-inside">
+                <li>Submit a test response to your Google Form</li>
+                <li>Check your email for the payment link (within 60 seconds)</li>
+                <li>Complete a test payment</li>
+                <li>Verify the transaction appears in your dashboard</li>
+              </ol>
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-4 border-t">
+              <button
+                onClick={handleComplete}
+                className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+              >
+                Complete Setup ✅
+              </button>
+            </div>
           </div>
-        </form>
+        )}
       </div>
     </div>
   );
