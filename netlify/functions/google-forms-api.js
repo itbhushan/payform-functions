@@ -1,5 +1,6 @@
-// netlify/functions/google-forms-api.js
+// netlify/functions/google-forms-api.js - PRODUCTION VERSION
 const { createClient } = require('@supabase/supabase-js');
+const { google } = require('googleapis');
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -15,35 +16,64 @@ const headers = {
   'Content-Type': 'application/json'
 };
 
+// Initialize Google API client
+const initGoogleAuth = () => {
+  try {
+    // Decode base64 service account key
+    const serviceAccountKey = JSON.parse(
+      Buffer.from(process.env.GOOGLE_SERVICE_ACCOUNT_KEY, 'base64').toString()
+    );
+
+    const auth = new google.auth.GoogleAuth({
+      credentials: serviceAccountKey,
+      scopes: [
+        'https://www.googleapis.com/auth/forms.responses.readonly',
+        'https://www.googleapis.com/auth/forms.body.readonly'
+      ]
+    });
+
+    return auth;
+  } catch (error) {
+    console.error('Error initializing Google Auth:', error);
+    throw new Error('Failed to initialize Google API authentication');
+  }
+};
+
 exports.handler = async (event, context) => {
+  console.log('🚀 Google Forms API function called');
+  console.log('Action:', JSON.parse(event.body || '{}').action);
+
   // Handle CORS preflight
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers, body: '' };
   }
 
   try {
-    const { action, formId, adminId } = JSON.parse(event.body || '{}');
+    const { action, formId, adminId, accessToken } = JSON.parse(event.body || '{}');
     
     switch (action) {
       case 'getFormStructure':
-        return await getFormStructure(formId);
+        return await getFormStructure(formId, accessToken);
       case 'getFormResponses':
-        return await getFormResponses(formId, adminId);
+        return await getFormResponses(formId, adminId, accessToken);
       case 'testFormAccess':
-        return await testFormAccess(formId);
+        return await testFormAccess(formId, accessToken);
+      case 'generateAuthUrl':
+        return await generateAuthUrl();
       default:
         return {
           statusCode: 400,
           headers,
-          body: JSON.stringify({ error: 'Invalid action' })
+          body: JSON.stringify({ error: 'Invalid action', availableActions: ['getFormStructure', 'getFormResponses', 'testFormAccess', 'generateAuthUrl'] })
         };
     }
   } catch (error) {
-    console.error('Google Forms API error:', error);
+    console.error('❌ Google Forms API error:', error);
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({ 
+        success: false,
         error: 'Internal server error',
         message: error.message 
       })
@@ -51,164 +81,300 @@ exports.handler = async (event, context) => {
   }
 };
 
-// Get Google Form structure and questions
-const getFormStructure = async (formId) => {
+// Generate OAuth URL for user authentication
+const generateAuthUrl = async () => {
   try {
-    // Note: This is a simplified version. In production, you'd need:
-    // 1. Google Forms API credentials
-    // 2. OAuth token for the user
-    // 3. Proper API calls to Google Forms API
-    
-    // For now, we'll simulate the form structure analysis
-    // In production, this would be:
-    // const response = await fetch(`https://forms.googleapis.com/v1/forms/${formId}`, {
-    //   headers: { 'Authorization': `Bearer ${accessToken}` }
-    // });
-    
-    // Simulate form structure analysis
-    const mockFormStructure = {
-      formId: formId,
-      title: `Form ${formId.slice(0, 8)}...`,
-      description: 'Analyzed form structure',
-      questions: [
-        {
-          questionId: 'entry.123456789',
-          title: 'Email Address',
-          type: 'SHORT_ANSWER',
-          required: true,
-          description: 'Please enter your email address'
-        },
-        {
-          questionId: 'entry.987654321',
-          title: 'Full Name',
-          type: 'SHORT_ANSWER', 
-          required: true,
-          description: 'Please enter your full name'
-        },
-        {
-          questionId: 'entry.456789123',
-          title: 'Select Product',
-          type: 'MULTIPLE_CHOICE',
-          required: true,
-          description: 'Choose your product',
-          choices: [
-            'Basic Course - ₹999',
-            'Premium Course - ₹1999',
-            'Enterprise Package - ₹4999'
-          ]
-        },
-        {
-          questionId: 'entry.789123456',
-          title: 'Phone Number',
-          type: 'SHORT_ANSWER',
-          required: false,
-          description: 'Optional: Your phone number'
-        }
-      ]
-    };
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      'https://payform2025.netlify.app/auth/callback'
+    );
+
+    const authUrl = oauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      scope: [
+        'https://www.googleapis.com/auth/forms.responses.readonly',
+        'https://www.googleapis.com/auth/forms.body.readonly'
+      ],
+      prompt: 'consent'
+    });
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: true,
-        data: mockFormStructure
+        authUrl: authUrl
       })
     };
 
   } catch (error) {
-    console.error('Error getting form structure:', error);
+    console.error('Error generating auth URL:', error);
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({ 
         success: false, 
-        error: 'Failed to analyze form structure' 
+        error: 'Failed to generate authentication URL' 
       })
     };
   }
 };
 
-// Get form responses (for monitoring)
-const getFormResponses = async (formId, adminId) => {
+// Get Google Form structure and questions using real API
+const getFormStructure = async (formId, accessToken) => {
   try {
-    // Get field mappings for this form
-    const { data: mappings } = await supabase
-      .from('form_field_mappings')
-      .select('*')
-      .eq('form_id', formId)
-      .eq('admin_id', adminId)
-      .single();
+    console.log(`🔍 Analyzing form structure for: ${formId}`);
 
-    if (!mappings) {
+    // Initialize Google Forms API client
+    let authClient;
+    if (accessToken) {
+      // Use user's OAuth token
+      authClient = new google.auth.OAuth2();
+      authClient.setCredentials({ access_token: accessToken });
+    } else {
+      // Use service account (limited access)
+      authClient = await initGoogleAuth();
+    }
+
+    const forms = google.forms({ version: 'v1', auth: authClient });
+
+    // Fetch form structure
+    const response = await forms.forms.get({
+      formId: formId
+    });
+
+    const form = response.data;
+    console.log(`✅ Form fetched: ${form.info?.title}`);
+
+    // Parse form questions
+    const questions = [];
+    if (form.items) {
+      form.items.forEach((item, index) => {
+        if (item.questionItem) {
+          const question = item.questionItem.question;
+          questions.push({
+            questionId: `entry.${item.itemId || index}`,
+            title: item.title || `Question ${index + 1}`,
+            type: question.choiceQuestion ? 'MULTIPLE_CHOICE' : 
+                  question.textQuestion ? 'SHORT_ANSWER' : 
+                  question.scaleQuestion ? 'SCALE' : 'OTHER',
+            required: question.required || false,
+            description: item.description || '',
+            choices: question.choiceQuestion?.options?.map(opt => opt.value) || []
+          });
+        }
+      });
+    }
+
+    const formStructure = {
+      formId: formId,
+      title: form.info?.title || 'Untitled Form',
+      description: form.info?.description || '',
+      questions: questions
+    };
+
+    console.log(`📊 Parsed ${questions.length} questions from form`);
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        success: true,
+        data: formStructure
+      })
+    };
+
+  } catch (error) {
+    console.error('❌ Error getting form structure:', error);
+    
+    // Handle specific API errors
+    if (error.code === 403) {
       return {
-        statusCode: 400,
+        statusCode: 403,
         headers,
         body: JSON.stringify({ 
           success: false, 
-          error: 'No field mappings found for this form' 
+          error: 'Access denied. Please ensure you have permission to access this form.',
+          requiresAuth: true
         })
       };
     }
 
-    // In production, this would fetch real responses from Google Forms API:
-    // const response = await fetch(`https://forms.googleapis.com/v1/forms/${formId}/responses`, {
-    //   headers: { 'Authorization': `Bearer ${accessToken}` }
-    // });
+    if (error.code === 404) {
+      return {
+        statusCode: 404,
+        headers,
+        body: JSON.stringify({ 
+          success: false, 
+          error: 'Form not found. Please check the form ID and ensure the form exists.' 
+        })
+      };
+    }
 
-    // For now, return empty responses (will be implemented with real API)
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ 
+        success: false, 
+        error: 'Failed to analyze form structure',
+        details: error.message
+      })
+    };
+  }
+};
+
+// Get form responses using real API
+const getFormResponses = async (formId, adminId) => {
+  try {
+    console.log(`📥 Fetching responses for form: ${formId}`);
+
+    // Get stored access token for this admin
+    const { data: adminTokens } = await supabase
+      .from('google_auth_tokens')
+      .select('access_token, refresh_token')
+      .eq('admin_id', adminId)
+      .single();
+
+    if (!adminTokens) {
+      return {
+        statusCode: 401,
+        headers,
+        body: JSON.stringify({ 
+          success: false, 
+          error: 'No Google authentication found. Please connect your Google account.',
+          requiresAuth: true
+        })
+      };
+    }
+
+    // Initialize API client with stored token
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET
+    );
+    
+    oauth2Client.setCredentials({
+      access_token: adminTokens.access_token,
+      refresh_token: adminTokens.refresh_token
+    });
+
+    const forms = google.forms({ version: 'v1', auth: oauth2Client });
+
+    // Get form responses
+    const response = await forms.forms.responses.list({
+      formId: formId
+    });
+
+    const responses = response.data.responses || [];
+    console.log(`📊 Found ${responses.length} total responses`);
+
+    // Filter for unprocessed responses
+    const processedResponseIds = await getProcessedResponseIds(formId);
+    const newResponses = responses.filter(r => !processedResponseIds.includes(r.responseId));
+
+    console.log(`🆕 Found ${newResponses.length} new responses to process`);
+
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: true,
         data: {
-          responses: [],
-          hasNewResponses: false
+          responses: newResponses,
+          hasNewResponses: newResponses.length > 0,
+          totalResponses: responses.length,
+          newResponsesCount: newResponses.length
         }
       })
     };
 
   } catch (error) {
-    console.error('Error getting form responses:', error);
+    console.error('❌ Error getting form responses:', error);
+    
+    if (error.code === 401) {
+      return {
+        statusCode: 401,
+        headers,
+        body: JSON.stringify({ 
+          success: false, 
+          error: 'Authentication expired. Please reconnect your Google account.',
+          requiresAuth: true
+        })
+      };
+    }
+
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({ 
         success: false, 
-        error: 'Failed to get form responses' 
+        error: 'Failed to get form responses',
+        details: error.message
       })
     };
   }
 };
 
-// Test if we can access the form
-const testFormAccess = async (formId) => {
+// Test form access
+const testFormAccess = async (formId, accessToken) => {
   try {
-    // In production, this would test API access:
-    // const response = await fetch(`https://forms.googleapis.com/v1/forms/${formId}`, {
-    //   headers: { 'Authorization': `Bearer ${accessToken}` }
-    // });
-    
-    // For now, simulate successful access
+    console.log(`🔐 Testing access to form: ${formId}`);
+
+    let authClient;
+    if (accessToken) {
+      authClient = new google.auth.OAuth2();
+      authClient.setCredentials({ access_token: accessToken });
+    } else {
+      authClient = await initGoogleAuth();
+    }
+
+    const forms = google.forms({ version: 'v1', auth: authClient });
+
+    // Try to get basic form info
+    const response = await forms.forms.get({
+      formId: formId
+    });
+
+    console.log(`✅ Access verified for form: ${response.data.info?.title}`);
+
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: true,
-        message: 'Form access verified',
+        message: 'Form access verified successfully',
+        formTitle: response.data.info?.title,
         formId: formId
       })
     };
 
   } catch (error) {
+    console.error('❌ Form access test failed:', error);
+    
     return {
-      statusCode: 500,  
+      statusCode: error.code || 500,
       headers,
       body: JSON.stringify({ 
         success: false, 
-        error: 'Cannot access form. Please check permissions.' 
+        error: `Cannot access form: ${error.message}`,
+        requiresAuth: error.code === 403 || error.code === 401
       })
     };
+  }
+};
+
+// Helper function to get processed response IDs
+const getProcessedResponseIds = async (formId) => {
+  try {
+    const { data } = await supabase
+      .from('processed_form_responses')
+      .select('response_id')
+      .eq('form_id', formId);
+
+    return data?.map(r => r.response_id) || [];
+  } catch (error) {
+    console.error('Error getting processed response IDs:', error);
+    return [];
   }
 };
