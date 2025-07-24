@@ -187,57 +187,75 @@ export const MyForms: React.FC = React.memo(() => {
   );
 });
 
-// Empty State Component
-const EmptyState: React.FC<{ onConnectForm: () => void; onShowGuide: () => void }> = ({ onConnectForm, onShowGuide }) => (
-  <div className="text-center py-12">
-    <div className="text-6xl mb-6">📋</div>
-    <h3 className="text-lg font-medium text-gray-900 mb-2">No Forms Connected Yet</h3>
-    <p className="text-gray-600 mb-8">Connect your first Google Form to start accepting payments</p>
-    
-    <div className="flex justify-center space-x-4">
-      <button
-        onClick={onConnectForm}
-        className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium"
-      >
-        + Connect Your First Form
-      </button>
-      <button
-        onClick={onShowGuide}
-        className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-medium"
-      >
-        📖 View Setup Guide
-      </button>
-    </div>
+// REPLACE the existing EmptyState component with this enhanced version:
+const EmptyState: React.FC<{ onConnectForm: () => void; onShowGuide: () => void }> = ({ onConnectForm, onShowGuide }) => {
+  const { user } = useAuth();
 
-    {/* Updated Quick Setup Guide */}
-    <div className="mt-12 bg-blue-50 border border-blue-200 rounded-lg p-6 text-left max-w-2xl mx-auto">
-      <h4 className="font-medium text-blue-900 mb-4">📋 Google Form Setup Guide</h4>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm text-blue-800">
-        <div>
-          <h5 className="font-medium mb-2">1. Required Form Fields</h5>
-          <ul className="space-y-1 text-xs">
-            <li>• <strong>Email</strong> (required for payment links)</li>
-            <li>• <strong>Product</strong> format: "Course - ₹2999"</li>
-            <li>• <strong>Customer Name</strong> (recommended)</li>
-            <li>• <strong>Phone Number</strong> (optional)</li>
-          </ul>
-        </div>
-        <div>
-          <h5 className="font-medium mb-2">2. Integration Steps</h5>
-          <ul className="space-y-1 text-xs">
-            <li>• Copy form ID from URL</li>
-            <li>• Install PayForm Apps Script</li>
-            <li>• Configure submit trigger</li>
-            <li>• Test with submission</li>
-          </ul>
-        </div>
+  return (
+    <div className="text-center py-12">
+      <div className="text-6xl mb-6">📋</div>
+      <h3 className="text-lg font-medium text-gray-900 mb-2">No Forms Connected Yet</h3>
+      <p className="text-gray-600 mb-8">Connect your first Google Form to start accepting payments</p>
+      
+      {/* Google Authentication Status */}
+      <div className="mb-8 p-4 bg-blue-50 border border-blue-200 rounded-lg max-w-md mx-auto">
+        <h4 className="font-medium text-blue-900 mb-3">🔐 Google Account Connection</h4>
+        <GoogleAuthButton 
+          adminId={user?.id || ''} 
+          onAuthSuccess={() => {
+            console.log('Google auth successful');
+          }} 
+        />
+        <p className="text-xs text-blue-700 mt-2">
+          Required to access your Google Forms and monitor responses
+        </p>
       </div>
-      <div className="mt-4 p-3 bg-blue-100 rounded-lg text-xs text-blue-700">
-        <p><strong>💡 Note:</strong> Product pricing is extracted from your form responses automatically. No need to configure products separately in PayForm!</p>
+      
+      <div className="flex justify-center space-x-4">
+        <button
+          onClick={onConnectForm}
+          className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium"
+        >
+          + Connect Your First Form
+        </button>
+        <button
+          onClick={onShowGuide}
+          className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-medium"
+        >
+          📖 View Setup Guide
+        </button>
+      </div>
+
+      {/* Rest of existing EmptyState content */}
+      <div className="mt-12 bg-blue-50 border border-blue-200 rounded-lg p-6 text-left max-w-2xl mx-auto">
+        <h4 className="font-medium text-blue-900 mb-4">📋 Google Form Setup Guide</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm text-blue-800">
+          <div>
+            <h5 className="font-medium mb-2">1. Required Form Fields</h5>
+            <ul className="space-y-1 text-xs">
+              <li>• <strong>Email</strong> (required for payment links)</li>
+              <li>• <strong>Product</strong> format: "Course - ₹2999"</li>
+              <li>• <strong>Customer Name</strong> (recommended)</li>
+              <li>• <strong>Phone Number</strong> (optional)</li>
+            </ul>
+          </div>
+          <div>
+            <h5 className="font-medium mb-2">2. Integration Steps</h5>
+            <ul className="space-y-1 text-xs">
+              <li>• Connect Google account</li>
+              <li>• Paste your form URL</li>
+              <li>• Map form fields to payment data</li>
+              <li>• Automatic monitoring begins</li>
+            </ul>
+          </div>
+        </div>
+        <div className="mt-4 p-3 bg-blue-100 rounded-lg text-xs text-blue-700">
+          <p><strong>💡 New:</strong> No more manual code setup! Just connect your Google account and paste form URLs.</p>
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 // ✅ FIX 2: Enhanced Forms Grid with Edit functionality
 const FormsGrid: React.FC<{ 
@@ -990,3 +1008,112 @@ const SetupGuideModal: React.FC<{ onClose: () => void }> = ({ onClose }) => (
     </div>
   </div>
 );
+
+// ADD this new component at the end of MyForms.tsx, before the final export:
+
+// Google Authentication Component
+const GoogleAuthButton: React.FC<{ adminId: string; onAuthSuccess: () => void }> = ({ adminId, onAuthSuccess }) => {
+  const [authStatus, setAuthStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
+  const [userEmail, setUserEmail] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    checkAuthStatus();
+  }, [adminId]);
+
+  const checkAuthStatus = async () => {
+    try {
+      const response = await fetch('/.netlify/functions/google-oauth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'checkAuth', adminId })
+      });
+
+      const result = await response.json();
+      
+      if (result.success && result.authenticated) {
+        setAuthStatus('connected');
+        // You could also fetch user email here
+      } else {
+        setAuthStatus('disconnected');
+      }
+    } catch (error) {
+      console.error('Error checking auth status:', error);
+      setAuthStatus('disconnected');
+    }
+  };
+
+  const connectGoogleAccount = async () => {
+    try {
+      setLoading(true);
+      
+      const response = await fetch('/.netlify/functions/google-oauth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'getAuthUrl', adminId })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        // Open Google OAuth in new window
+        window.open(result.authUrl, 'google-auth', 'width=500,height=600');
+        
+        // Listen for auth completion
+        const checkAuthInterval = setInterval(() => {
+          checkAuthStatus().then(() => {
+            if (authStatus === 'connected') {
+              clearInterval(checkAuthInterval);
+              onAuthSuccess();
+              setLoading(false);
+            }
+          });
+        }, 2000);
+        
+        // Clear interval after 5 minutes
+        setTimeout(() => clearInterval(checkAuthInterval), 300000);
+      }
+    } catch (error) {
+      console.error('Error connecting Google account:', error);
+      setLoading(false);
+    }
+  };
+
+  if (authStatus === 'checking') {
+    return (
+      <div className="flex items-center space-x-2 text-gray-500">
+        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-500"></div>
+        <span className="text-sm">Checking Google connection...</span>
+      </div>
+    );
+  }
+
+  if (authStatus === 'connected') {
+    return (
+      <div className="flex items-center space-x-2 text-green-600">
+        <span className="text-lg">✅</span>
+        <span className="text-sm font-medium">Google Forms Connected</span>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={connectGoogleAccount}
+      disabled={loading}
+      className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+    >
+      {loading ? (
+        <>
+          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+          <span>Connecting...</span>
+        </>
+      ) : (
+        <>
+          <span>🔗</span>
+          <span>Connect Google Account</span>
+        </>
+      )}
+    </button>
+  );
+};
