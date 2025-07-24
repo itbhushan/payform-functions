@@ -433,6 +433,82 @@ export const useFormConfigs = (adminId?: string) => {
   return { forms, loading };
 };
 
+// ADD this new hook for Google Forms integration:
+export const useGoogleFormIntegration = (adminId?: string) => {
+  const [fieldMappings, setFieldMappings] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // Save field mapping for a form
+  const saveFieldMapping = async (formId: string, mappings: any) => {
+    if (!adminId) {
+      return { success: false, error: 'No admin ID provided' };
+    }
+
+    try {
+      setLoading(true);
+      
+      const { data, error } = await supabase
+        .from('form_field_mappings')
+        .upsert({
+          form_id: formId,
+          admin_id: adminId,
+          email_field_id: mappings.emailField,
+          product_field_id: mappings.productField,
+          name_field_id: mappings.nameField,
+          phone_field_id: mappings.phoneField,
+          updated_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Update local state
+      setFieldMappings(prev => {
+        const filtered = prev.filter(fm => fm.form_id !== formId);
+        return [...filtered, data];
+      });
+
+      return { success: true, data };
+    } catch (error: any) {
+      console.error('Error saving field mapping:', error);
+      return { success: false, error: error.message };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Get field mapping for a form
+  const getFieldMapping = async (formId: string) => {
+    if (!adminId) return null;
+
+    try {
+      const { data, error } = await supabase
+        .from('form_field_mappings')
+        .select('*')
+        .eq('form_id', formId)
+        .eq('admin_id', adminId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        throw error;
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error getting field mapping:', error);
+      return null;
+    }
+  };
+
+  return {
+    fieldMappings,
+    loading,
+    saveFieldMapping,
+    getFieldMapping
+  };
+};
+
 // Utility function to calculate commission splits
 export const calculateCommissionSplit = (
   totalAmount: number, 
