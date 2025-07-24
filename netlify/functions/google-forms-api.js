@@ -1,4 +1,4 @@
-// netlify/functions/google-forms-api.js - PRODUCTION VERSION
+// netlify/functions/google-forms-api.js - UPDATED VERSION (Database Credentials)
 const { createClient } = require('@supabase/supabase-js');
 const { google } = require('googleapis');
 
@@ -16,13 +16,24 @@ const headers = {
   'Content-Type': 'application/json'
 };
 
-// Initialize Google API client
-const initGoogleAuth = () => {
+// Initialize Google API client with credentials from database
+const initGoogleAuth = async () => {
   try {
-    // Decode base64 service account key
-    const serviceAccountKey = JSON.parse(
-      Buffer.from(process.env.GOOGLE_SERVICE_ACCOUNT_KEY, 'base64').toString()
-    );
+    console.log('🔐 Loading Google service account credentials from database...');
+    
+    // Get credentials from Supabase
+    const { data: credData, error } = await supabase
+      .from('google_service_credentials')
+      .select('service_account_json')
+      .eq('is_active', true)
+      .single();
+
+    if (error || !credData) {
+      throw new Error('No Google service account credentials found in database');
+    }
+
+    const serviceAccountKey = credData.service_account_json;
+    console.log('✅ Service account credentials loaded from database');
 
     const auth = new google.auth.GoogleAuth({
       credentials: serviceAccountKey,
@@ -34,8 +45,8 @@ const initGoogleAuth = () => {
 
     return auth;
   } catch (error) {
-    console.error('Error initializing Google Auth:', error);
-    throw new Error('Failed to initialize Google API authentication');
+    console.error('❌ Error initializing Google Auth:', error);
+    throw new Error('Failed to initialize Google API authentication: ' + error.message);
   }
 };
 
@@ -64,7 +75,10 @@ exports.handler = async (event, context) => {
         return {
           statusCode: 400,
           headers,
-          body: JSON.stringify({ error: 'Invalid action', availableActions: ['getFormStructure', 'getFormResponses', 'testFormAccess', 'generateAuthUrl'] })
+          body: JSON.stringify({ 
+            error: 'Invalid action', 
+            availableActions: ['getFormStructure', 'getFormResponses', 'testFormAccess', 'generateAuthUrl'] 
+          })
         };
     }
   } catch (error) {
@@ -133,7 +147,7 @@ const getFormStructure = async (formId, accessToken) => {
       authClient = new google.auth.OAuth2();
       authClient.setCredentials({ access_token: accessToken });
     } else {
-      // Use service account (limited access)
+      // Use service account from database
       authClient = await initGoogleAuth();
     }
 
