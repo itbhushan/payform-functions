@@ -258,18 +258,38 @@ export const formatDate = (dateString: string) => {
 
 // ADD these new utility functions:
 // Fetch Google Form structure via our API
-export const fetchGoogleFormStructure = async (formId: string): Promise<GoogleFormStructure | null> => {
+
+export const fetchGoogleFormStructure = async (formId: string, adminId?: string): Promise<GoogleFormStructure | null> => {
   try {
+    console.log('🔍 Fetching form structure for:', formId, 'Admin:', adminId);
+    
     const response = await fetch('/.netlify/functions/google-forms-api', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'getFormStructure', formId })
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ 
+        action: 'getFormStructure', 
+        formId: formId,
+        adminId: adminId  // ← ADD USER CONTEXT
+      })
     });
     
+    console.log('📡 API Response status:', response.status);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ API Error:', response.status, errorText);
+      throw new Error(`API Error: ${response.status} ${errorText}`);
+    }
+    
     const result = await response.json();
+    console.log('✅ API Result:', result);
+    
     return result.success ? result.data : null;
   } catch (error) {
-    console.error('Error fetching form structure:', error);
+    console.error('❌ Error fetching form structure:', error);
     return null;
   }
 };
