@@ -135,31 +135,109 @@ const generateAuthUrl = async () => {
   }
 };
 
-// Get Google Form structure and questions using real API
-const getFormStructure = async (formId, accessToken) => {
+// Get Google Form structure using USER'S OAuth token
+const getFormStructure = async (formId, adminId) => {
   try {
     console.log(`🔍 Analyzing form structure for: ${formId}`);
+    console.log(`👤 Admin requesting access: ${adminId}`);
 
-    // Initialize Google Forms API client
+    // ✅ PROPER FIX: Get user's OAuth token from database
     let authClient;
-    if (accessToken) {
-      // Use user's OAuth token
-      authClient = new google.auth.OAuth2();
-      authClient.setCredentials({ access_token: accessToken });
+    
+    if (adminId) {
+      console.log('🔐 Looking up user OAuth token...');
+      
+      // Get stored access token for this admin
+      const { data: adminTokens, error: tokenError } = await supabase
+        .from('google_auth_tokens')
+        .select('access_token, refresh_token, token_expires_at')
+        .eq('admin_id', adminId)
+        .single();
+
+      if (tokenError || !adminTokens) {
+        console.error('❌ No OAuth token found for admin:', adminId);
+        return {
+          statusCode: 401,
+          headers,
+          body: JSON.stringify({ 
+            success: false, 
+            error: 'No Google authentication found. Please reconnect your Google account.',
+            requiresAuth: true
+          })
+        };
+      }
+
+      // Check if token is expired
+      const now = new Date();
+      const expiresAt = new Date(adminTokens.token_expires_at);
+      
+      if (expiresAt <= now) {
+        console.warn('⚠️ Access token expired, attempting refresh...');
+        
+        // Try to refresh the token
+        const oauth2Client = new google.auth.OAuth2(
+          process.env.GOOGLE_CLIENT_ID,
+          process.env.GOOGLE_CLIENT_SECRET
+        );
+        
+        oauth2Client.setCredentials({
+          refresh_token: adminTokens.refresh_token
+        });
+        
+        try {
+          const { credentials } = await oauth2Client.refreshAccessToken();
+          console.log('✅ Token refreshed successfully');
+          
+          // Update token in database
+          await supabase
+            .from('google_auth_tokens')
+            .update({
+              access_token: credentials.access_token,
+              token_expires_at: new Date(credentials.expiry_date).toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .eq('admin_id', adminId);
+          
+          authClient = oauth2Client;
+        } catch (refreshError) {
+          console.error('❌ Token refresh failed:', refreshError);
+          return {
+            statusCode: 401,
+            headers,
+            body: JSON.stringify({ 
+              success: false, 
+              error: 'Google authentication expired. Please reconnect your Google account.',
+              requiresAuth: true
+            })
+          };
+        }
+      } else {
+        console.log('✅ Using valid OAuth token');
+        authClient = new google.auth.OAuth2();
+        authClient.setCredentials({ access_token: adminTokens.access_token });
+      }
     } else {
-      // Use service account from database
-      authClient = await initGoogleAuth();
+      console.error('❌ No admin ID provided');
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ 
+          success: false, 
+          error: 'Admin ID required for form access'
+        })
+      };
     }
 
+    console.log('🌐 Making Google Forms API request...');
     const forms = google.forms({ version: 'v1', auth: authClient });
 
-    // Fetch form structure
+    // Fetch form structure with user's OAuth token
     const response = await forms.forms.get({
       formId: formId
     });
 
     const form = response.data;
-    console.log(`✅ Form fetched: ${form.info?.title}`);
+    console.log(`✅ Form fetched successfully: ${form.info?.title}`);
 
     // Parse form questions
     const questions = [];
@@ -188,7 +266,7 @@ const getFormStructure = async (formId, accessToken) => {
       questions: questions
     };
 
-    console.log(`📊 Parsed ${questions.length} questions from form`);
+    console.log(`📊 Successfully parsed ${questions.length} questions from form`);
 
     return {
       statusCode: 200,
@@ -221,7 +299,7 @@ const getFormStructure = async (formId, accessToken) => {
         headers,
         body: JSON.stringify({ 
           success: false, 
-          error: 'Form not found. Please check the form ID and ensure the form exists.' 
+          error: 'Form not found. Please check the form URL and ensure the form exists.' 
         })
       };
     }
@@ -330,18 +408,43 @@ const getFormResponses = async (formId, adminId) => {
   }
 };
 
-// Test form access
-const testFormAccess = async (formId, accessToken) => {
+// Test form access using user's OAuth token
+const testFormAccess = async (formId, adminId) => {
   try {
-    console.log(`🔐 Testing access to form: ${formId}`);
+    console.log(`🔐 Testing access to form: ${formId} for admin: ${adminId}`);
 
-    let authClient;
-    if (accessToken) {
-      authClient = new google.auth.OAuth2();
-      authClient.setCredentials({ access_token: accessToken });
-    } else {
-      authClient = await initGoogleAuth();
+    if (!adminId) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ 
+          success: false, 
+          error: 'Admin ID required for form access test'
+        })
+      };
     }
+
+    // Get user's OAuth token and test access
+    const { data: adminTokens } = await supabase
+      .from('google_auth_tokens')
+      .select('access_token')
+      .eq('admin_id', adminId)
+      .single();
+
+    if (!adminTokens) {
+      return {
+        statusCode: 401,
+        headers,
+        body: JSON.stringify({ 
+          success: false, 
+          error: 'No Google authentication found. Please connect your Google account.',
+          requiresAuth: true
+        })
+      };
+    }
+
+    const authClient = new google.auth.OAuth2();
+    authClient.setCredentials({ access_token: adminTokens.access_token });
 
     const forms = google.forms({ version: 'v1', auth: authClient });
 
