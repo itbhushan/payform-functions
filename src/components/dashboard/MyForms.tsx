@@ -490,7 +490,7 @@ const AddFormModal: React.FC<{ onClose: () => void; onSuccess: () => void }> = (
       }
 
       // Get form structure
-      const structure = await fetchGoogleFormStructure(formId);
+      const structure = await fetchGoogleFormStructure(formId, user?.id);
       if (!structure) {
         setError('Failed to analyze form structure. Please try again.');
         setLoading(false);
