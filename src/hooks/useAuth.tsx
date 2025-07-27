@@ -18,9 +18,12 @@ interface AuthContextType {
   signUp: (email: string, password: string, name: string, company_name?: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
-  // ✅ Add these missing properties
   isFormAdmin: boolean;
   isSuperAdmin: boolean;
+  // 🆕 Add Google OAuth functions
+  connectGoogleAccount: () => Promise<{ success: boolean; error?: string }>;
+  checkGoogleAuth: () => Promise<{ authenticated: boolean; needsRefresh?: boolean }>;
+  googleAuthLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -287,6 +290,72 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
   };
 
+// 🆕 Add Google OAuth state
+const [googleAuthLoading, setGoogleAuthLoading] = useState(false);
+
+// 🆕 Google OAuth Functions
+const connectGoogleAccount = async () => {
+  if (!user?.id) {
+    return { success: false, error: 'User not authenticated' };
+  }
+
+  try {
+    setGoogleAuthLoading(true);
+    console.log('🔐 Initiating Google OAuth for admin:', user.id);
+
+    const response = await fetch('/.netlify/functions/google-oauth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        action: 'getAuthUrl', 
+        adminId: user.id 
+      })
+    });
+
+    const result = await response.json();
+    
+    if (result.success && result.authUrl) {
+      console.log('✅ Redirecting to Google OAuth...');
+      window.location.href = result.authUrl;
+      return { success: true };
+    } else {
+      console.error('❌ Failed to get OAuth URL:', result.error);
+      return { success: false, error: result.error || 'Failed to initiate Google authentication' };
+    }
+  } catch (error) {
+    console.error('❌ Google OAuth error:', error);
+    return { success: false, error: 'Failed to connect Google account' };
+  } finally {
+    setGoogleAuthLoading(false);
+  }
+};
+
+const checkGoogleAuth = async () => {
+  if (!user?.id) {
+    return { authenticated: false };
+  }
+
+  try {
+    const response = await fetch('/.netlify/functions/google-oauth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        action: 'checkAuth', 
+        adminId: user.id 
+      })
+    });
+
+    const result = await response.json();
+    return {
+      authenticated: result.authenticated || false,
+      needsRefresh: result.needsRefresh || false
+    };
+  } catch (error) {
+    console.error('❌ Error checking Google auth:', error);
+    return { authenticated: false };
+  }
+};
+
 const value: AuthContextType = {
   user,
   session,
@@ -296,9 +365,12 @@ const value: AuthContextType = {
   signUp,
   signOut,
   refreshProfile,
-  // ✅ Add these missing functions that App.tsx expects
-  isFormAdmin: true, // All users are form admins for now
-  isSuperAdmin: user?.email === 'admin@payform.com' // Only this email is super admin
+  isFormAdmin: true,
+  isSuperAdmin: user?.email === 'admin@payform.com',
+  // 🆕 Add Google OAuth functions
+  connectGoogleAccount,
+  checkGoogleAuth,
+  googleAuthLoading
 };
   
   return (
