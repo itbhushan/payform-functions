@@ -1043,42 +1043,32 @@ const GoogleAuthButton: React.FC<{ adminId: string; onAuthSuccess: () => void }>
     }
   };
 
-  const connectGoogleAccount = async () => {
-    try {
-      setLoading(true);
-      
-      const response = await fetch('/.netlify/functions/google-oauth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getAuthUrl', adminId })
-      });
+const connectGoogleAccount = async () => {
+  try {
+    setLoading(true);
+    
+    const response = await fetch('/.netlify/functions/google-oauth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'getAuthUrl', adminId })
+    });
 
-      const result = await response.json();
-      
-      if (result.success) {
-        // Open Google OAuth in new window
-        window.open(result.authUrl, 'google-auth', 'width=500,height=600');
-        
-        // Listen for auth completion
-        const checkAuthInterval = setInterval(() => {
-          checkAuthStatus().then(() => {
-            if (authStatus === 'connected') {
-              clearInterval(checkAuthInterval);
-              onAuthSuccess();
-              setLoading(false);
-            }
-          });
-        }, 2000);
-        
-        // Clear interval after 5 minutes
-        setTimeout(() => clearInterval(checkAuthInterval), 300000);
-      }
-    } catch (error) {
-      console.error('Error connecting Google account:', error);
+    const result = await response.json();
+    
+    if (result.success) {
+      // 🆕 Simple redirect instead of popup + polling
+      console.log('🔐 Redirecting to Google OAuth...');
+      window.location.href = result.authUrl;
+    } else {
+      console.error('Failed to get OAuth URL:', result.error);
       setLoading(false);
     }
-  };
-
+  } catch (error) {
+    console.error('Error connecting Google account:', error);
+    setLoading(false);
+  }
+};
+  
   if (authStatus === 'checking') {
     return (
       <div className="flex items-center space-x-2 text-gray-500">
