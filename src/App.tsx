@@ -937,6 +937,25 @@ const AdminManagement: React.FC = () => {
 const App: React.FC = () => {
   const { user, loading } = useAuth();
 
+  // 🆕 ADD THIS ENTIRE USEEFFECT BLOCK HERE
+  React.useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const authStatus = urlParams.get('auth');
+    const email = urlParams.get('email');
+    const message = urlParams.get('message');
+
+    if (authStatus === 'success' && email) {
+      console.log('✅ Google OAuth successful for:', email);
+      // Clean URL and show success message
+      window.history.replaceState({}, document.title, window.location.pathname);
+      // You could add a toast notification here
+    } else if (authStatus === 'error') {
+      console.error('❌ Google OAuth error:', message);
+      window.history.replaceState({}, document.title, window.location.pathname);
+      // You could add an error notification here
+    }
+  }, []);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
