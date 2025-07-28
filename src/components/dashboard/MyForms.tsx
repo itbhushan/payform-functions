@@ -482,7 +482,7 @@ const AddFormModal: React.FC<{ onClose: () => void; onSuccess: () => void }> = (
       }
 
       // Test form access
-      const hasAccess = await testGoogleFormAccess(formId);
+      const hasAccess = await testGoogleFormAccess(formId, user?.id);
       if (!hasAccess) {
         setError('Cannot access this form. Please check the URL and permissions.');
         setLoading(false);
