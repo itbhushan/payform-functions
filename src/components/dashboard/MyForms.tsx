@@ -435,6 +435,14 @@ const FormCard: React.FC<{
 
 const AddFormModal: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ onClose, onSuccess }) => {
   const { user } = useAuth();
+ 
+  // 🐛 DEBUG: Log user context when modal opens
+  React.useEffect(() => {
+    console.log('🔍 AddFormModal - User context:', user);
+    console.log('🔍 AddFormModal - User ID:', user?.id);
+    console.log('🔍 AddFormModal - User email:', user?.email);
+  }, [user]);
+  
   const { saveFieldMapping } = useGoogleFormIntegration(user?.id);
   
   // Form state
@@ -482,15 +490,30 @@ const AddFormModal: React.FC<{ onClose: () => void; onSuccess: () => void }> = (
       }
 
       // Test form access
-      const hasAccess = await testGoogleFormAccess(formId, user?.id);
-      if (!hasAccess) {
-        setError('Cannot access this form. Please check the URL and permissions.');
-        setLoading(false);
-        return;
-      }
+// 🐛 DEBUG: Check user context
+console.log('🔍 DEBUG - User object:', user);
+console.log('🔍 DEBUG - User ID:', user?.id);
+console.log('🔍 DEBUG - Form ID extracted:', formId);
 
-      // Get form structure
-      const structure = await fetchGoogleFormStructure(formId, user?.id);
+if (!user?.id) {
+  setError('User authentication required. Please refresh the page and try again.');
+  setLoading(false);
+  return;
+}
+
+// Test form access with proper user ID
+console.log('🔐 Testing form access with admin ID:', user.id);
+const hasAccess = await testGoogleFormAccess(formId, user.id);
+if (!hasAccess) {
+  setError('Cannot access this form. Please check the URL and permissions, or ensure your Google account is connected.');
+  setLoading(false);
+  return;
+}
+
+// Get form structure with proper user ID
+console.log('🔍 Fetching form structure with admin ID:', user.id);
+const structure = await fetchGoogleFormStructure(formId, user.id);
+      
       if (!structure) {
         setError('Failed to analyze form structure. Please try again.');
         setLoading(false);
