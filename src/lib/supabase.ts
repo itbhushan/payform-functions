@@ -263,6 +263,11 @@ export const fetchGoogleFormStructure = async (formId: string, adminId?: string)
   try {
     console.log('🔍 Fetching form structure for:', formId, 'Admin:', adminId);
     
+    if (!adminId) {
+      console.error('❌ Admin ID is required for form structure access');
+      throw new Error('Admin ID is required for Google Forms access');
+    }
+    
     const response = await fetch('/.netlify/functions/google-forms-api', {
       method: 'POST',
       headers: { 
@@ -272,7 +277,7 @@ export const fetchGoogleFormStructure = async (formId: string, adminId?: string)
       body: JSON.stringify({ 
         action: 'getFormStructure', 
         formId: formId,
-        adminId: adminId  // ← ADD USER CONTEXT
+        adminId: adminId  // This matches what the function expects
       })
     });
     
@@ -281,26 +286,50 @@ export const fetchGoogleFormStructure = async (formId: string, adminId?: string)
     if (!response.ok) {
       const errorText = await response.text();
       console.error('❌ API Error:', response.status, errorText);
-      throw new Error(`API Error: ${response.status} ${errorText}`);
+      
+      // Handle specific error cases
+      if (response.status === 401) {
+        throw new Error('Google authentication required. Please connect your Google account.');
+      } else if (response.status === 403) {
+        throw new Error('Access denied. Please ensure you have permission to access this form.');
+      } else if (response.status === 404) {
+        throw new Error('Form not found. Please check the form URL.');
+      } else {
+        throw new Error(`API Error: ${response.status} ${errorText}`);
+      }
     }
     
     const result = await response.json();
     console.log('✅ API Result:', result);
     
-    return result.success ? result.data : null;
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to fetch form structure');
+    }
+    
+    return result.data;
   } catch (error) {
     console.error('❌ Error fetching form structure:', error);
-    return null;
+    throw error; // Re-throw to let the calling function handle it
   }
 };
 
 // Test Google Form access
-export const testGoogleFormAccess = async (formId: string): Promise<boolean> => {
+
+export const testGoogleFormAccess = async (formId: string, adminId?: string): Promise<boolean> => {
   try {
+    if (!adminId) {
+      console.error('❌ Admin ID is required for form access test');
+      return false;
+    }
+    
     const response = await fetch('/.netlify/functions/google-forms-api', {
       method: 'POST',  
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'testFormAccess', formId })
+      body: JSON.stringify({ 
+        action: 'testFormAccess', 
+        formId,
+        adminId  // Add adminId parameter
+      })
     });
     
     const result = await response.json();
