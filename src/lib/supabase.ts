@@ -342,21 +342,39 @@ export const testGoogleFormAccess = async (formId: string, adminId?: string): Pr
 
 // Extract Google Form ID from various URL formats
 export const extractGoogleFormId = (url: string): string | null => {
+  console.log('🔍 Extracting Form ID from URL:', url);
+  
+  // Updated patterns to handle different Google Form URL formats
   const patterns = [
-    // Published form: /forms/d/e/LONG_ID/viewform
-    /forms\/d\/e\/([a-zA-Z0-9-_]{25,})/,
-    // Edit form: /forms/d/LONG_ID/edit  
-    /forms\/d\/([a-zA-Z0-9-_]{25,})\/edit/,
-    // General form: /forms/d/LONG_ID/
-    /forms\/d\/([a-zA-Z0-9-_]{25,})/
+    // Edit form: /forms/d/FORM_ID/edit
+    /\/forms\/d\/([a-zA-Z0-9-_]{25,})\/edit/,
+    // View form: /forms/d/FORM_ID/viewform  
+    /\/forms\/d\/([a-zA-Z0-9-_]{25,})\/viewform/,
+    // Published form: /forms/d/e/RESPONSE_ID/viewform - CONVERT TO FORM_ID
+    /\/forms\/d\/e\/([a-zA-Z0-9-_]{25,})\/viewform/,
+    // General form: /forms/d/FORM_ID
+    /\/forms\/d\/([a-zA-Z0-9-_]{25,})/
   ];
   
-  for (const pattern of patterns) {
+  for (let i = 0; i < patterns.length; i++) {
+    const pattern = patterns[i];
     const match = url.match(pattern);
-    if (match && match[1] && match[1].length >= 25) {
-      return match[1];
+    
+    if (match && match[1]) {
+      const extractedId = match[1];
+      console.log(`✅ Pattern ${i + 1} matched, extracted ID:`, extractedId);
+      
+      // For published forms (pattern index 2), we need to handle the response ID differently
+      if (i === 2) {
+        console.warn('⚠️ This appears to be a published form response URL. You may need the edit URL instead.');
+        console.warn('💡 Try using the form edit URL: https://docs.google.com/forms/d/FORM_ID/edit');
+        // For now, return the extracted ID and let the API handle it
+      }
+      
+      return extractedId;
     }
   }
   
+  console.error('❌ No valid Form ID found in URL');
   return null;
 };
