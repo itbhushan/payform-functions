@@ -120,40 +120,67 @@ exports.handler = async (event, context) => {
 // Get all active forms with field mappings and Google authentication
 const getActiveFormsWithAuth = async () => {
   try {
-    const { data: forms, error } = await supabase
+    // First get active forms
+    const { data: forms, error: formsError } = await supabase
       .from('form_configs')
-      .select(`
-        id,
-        form_id,
-        form_name,
-        admin_id,
-        form_field_mappings (
-          email_field_id,
-          product_field_id,
-          name_field_id,
-          phone_field_id
-        ),
-        form_admins (
-          email,
-          name
-        ),
-        google_auth_tokens (
-          access_token,
-          refresh_token
-        )
-      `)
+      .select('*')
       .eq('is_active', true);
 
-    if (error) throw error;
+    if (formsError) throw formsError;
 
-    // Filter forms that have both field mappings and Google auth
-    return forms?.filter(form => 
-      form.form_field_mappings?.length > 0 &&
-      form.google_auth_tokens?.length > 0
-    ) || [];
+    console.log(`📋 Found ${forms?.length || 0} active forms`);
+
+    if (!forms || forms.length === 0) {
+      return [];
+    }
+
+    // Get field mappings for each form
+    const formsWithMappings = [];
+    
+    for (const form of forms) {
+      // Get field mapping
+      const { data: fieldMapping } = await supabase
+        .from('form_field_mappings')
+        .select('*')
+        .eq('form_id', form.form_id)
+        .single();
+
+      // Get admin info
+      const { data: adminInfo } = await supabase
+        .from('form_admins')
+        .select('email, name')
+        .eq('id', form.admin_id)
+        .single();
+
+      // Get Google auth token
+      const { data: authToken } = await supabase
+        .from('google_auth_tokens')
+        .select('access_token, refresh_token')
+        .eq('admin_id', form.admin_id)
+        .single();
+
+      // Only include forms with complete setup
+      if (fieldMapping && adminInfo && authToken) {
+        formsWithMappings.push({
+          ...form,
+          form_field_mappings: [fieldMapping],
+          form_admins: [adminInfo],
+          google_auth_tokens: [authToken]
+        });
+      } else {
+        console.warn(`⚠️ Form ${form.form_name} missing required data:`, {
+          hasFieldMapping: !!fieldMapping,
+          hasAdminInfo: !!adminInfo,
+          hasAuthToken: !!authToken
+        });
+      }
+    }
+
+    console.log(`✅ ${formsWithMappings.length} forms have complete setup`);
+    return formsWithMappings;
 
   } catch (error) {
-    console.error('Error getting active forms with auth:', error);
+    console.error('❌ Error getting active forms with auth:', error);
     return [];
   }
 };
@@ -218,6 +245,8 @@ const processFormResponses = async (form) => {
 // Fetch form responses from Google Forms API
 const fetchFormResponsesFromAPI = async (formId, adminId) => {
   try {
+    console.log(`🔍 Fetching responses for form ${formId} with admin ${adminId}`);
+    
     const response = await fetch(`${process.env.URL}/.netlify/functions/google-forms-api`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -228,7 +257,16 @@ const fetchFormResponsesFromAPI = async (formId, adminId) => {
       })
     });
 
+    console.log(`📡 API Response status: ${response.status}`);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ API Error: ${response.status} ${errorText}`);
+      throw new Error(`API Error: ${response.status} ${errorText}`);
+    }
+
     const result = await response.json();
+    console.log(`📝 API Result:`, result);
 
     if (!result.success) {
       if (result.requiresAuth) {
@@ -238,10 +276,10 @@ const fetchFormResponsesFromAPI = async (formId, adminId) => {
       throw new Error(result.error || 'Failed to fetch responses');
     }
 
-    return result.data.responses || [];
+    return result.data?.responses || [];
 
   } catch (error) {
-    console.error('Error fetching form responses from API:', error);
+    console.error('❌ Error fetching form responses from API:', error);
     return [];
   }
 };
