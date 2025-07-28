@@ -49,18 +49,20 @@ exports.handler = async (event, context) => {
     const { tokens } = await oauth2Client.getToken(code);
     console.log('✅ Tokens received from Google');
 
-    // Store tokens in database
-    const { error: dbError } = await supabase
-      .from('google_auth_tokens')
-      .upsert({
-        admin_id: adminId,
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token,
-        token_expires_at: new Date(tokens.expiry_date).toISOString(),
-        scope: tokens.scope,
-        updated_at: new Date().toISOString()
-      });
-
+// Store tokens in database
+const { error: dbError } = await supabase
+  .from('google_auth_tokens')
+  .upsert({
+    admin_id: adminId,
+    access_token: tokens.access_token,
+    refresh_token: tokens.refresh_token,
+    token_expires_at: new Date(tokens.expiry_date).toISOString(),
+    scope: tokens.scope,
+    updated_at: new Date().toISOString()
+  }, {
+    onConflict: 'admin_id'
+  });
+    
     if (dbError) {
       console.error('Database error:', dbError);
       throw dbError;
