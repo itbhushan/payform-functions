@@ -2,6 +2,19 @@
 const { createClient } = require('@supabase/supabase-js');
 
 exports.handler = async (event, context) => {
+    // Add this line to parse adminId from request body
+  const { adminId } = JSON.parse(event.body || '{}');
+  
+  if (!adminId) {
+    return {
+      statusCode: 400,
+      headers,
+      body: JSON.stringify({ 
+        error: 'admin_id is required',
+        message: 'Please provide adminId in request body' 
+      })
+    };
+    
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
