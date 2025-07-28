@@ -60,18 +60,24 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    const { action, formId, adminId, accessToken } = JSON.parse(event.body || '{}');
+    const requestBody = JSON.parse(event.body || '{}');
+    const { action, formId, adminId, accessToken } = requestBody;
+
+    // 🐛 DEBUG: Log all received parameters
+    console.log('🔍 Received parameters:', { action, formId, adminId, accessToken });
+    console.log('🔍 Full request body:', requestBody);
     
-    switch (action) {
-      case 'getFormStructure':
-        return await getFormStructure(formId, accessToken);
-      case 'getFormResponses':
-        return await getFormResponses(formId, adminId, accessToken);
-      case 'testFormAccess':
-        return await testFormAccess(formId, accessToken);
-      case 'generateAuthUrl':
-        return await generateAuthUrl();
-      default:
+switch (action) {
+  case 'getFormStructure':
+    return await getFormStructure(formId, adminId);  // Pass adminId, not accessToken
+  case 'getFormResponses':
+    return await getFormResponses(formId, adminId);
+  case 'testFormAccess':
+    return await testFormAccess(formId, adminId);    // Pass adminId, not accessToken
+  case 'generateAuthUrl':
+    return await generateAuthUrl();
+  
+  default:
         return {
           statusCode: 400,
           headers,
@@ -410,6 +416,8 @@ const getFormResponses = async (formId, adminId) => {
 
 // Test form access using user's OAuth token
 const testFormAccess = async (formId, adminId) => {
+  // Add debug logging to see what parameters are actually received
+  console.log('🔍 testFormAccess called with:', { formId, adminId });
   try {
     console.log(`🔐 Testing access to form: ${formId} for admin: ${adminId}`);
 
