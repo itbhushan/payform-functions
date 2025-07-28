@@ -474,19 +474,35 @@ const testFormAccess = async (formId, adminId) => {
       })
     };
 
-  } catch (error) {
-    console.error('❌ Form access test failed:', error);
-    
-    return {
-      statusCode: error.code || 500,
-      headers,
-      body: JSON.stringify({ 
-        success: false, 
-        error: `Cannot access form: ${error.message}`,
-        requiresAuth: error.code === 403 || error.code === 401
-      })
-    };
+} catch (error) {
+  console.error('❌ Form access test failed:', error);
+  
+  let errorMessage = 'Cannot access form';
+  let helpText = '';
+  
+  if (error.code === 404) {
+    errorMessage = 'Form not found';
+    helpText = 'Please check the URL. Try using the form EDIT URL instead of the response/view URL.';
+  } else if (error.code === 403) {
+    errorMessage = 'Access denied';  
+    helpText = 'Please ensure you have permission to access this form and your Google account is connected.';
+  } else if (error.code === 401) {
+    errorMessage = 'Authentication required';
+    helpText = 'Please reconnect your Google account.';
   }
+  
+  return {
+    statusCode: error.code || 500,
+    headers,
+    body: JSON.stringify({ 
+      success: false, 
+      error: errorMessage,
+      details: error.message,
+      helpText: helpText,
+      requiresAuth: error.code === 403 || error.code === 401
+    })
+  };
+}
 };
 
 // Helper function to get processed response IDs
