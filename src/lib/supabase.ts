@@ -344,37 +344,61 @@ export const testGoogleFormAccess = async (formId: string, adminId?: string): Pr
 export const extractGoogleFormId = (url: string): string | null => {
   console.log('🔍 Extracting Form ID from URL:', url);
   
-  // Updated patterns to handle different Google Form URL formats
+  // PRIORITY ORDER: Edit URLs first (most reliable)
   const patterns = [
-    // Edit form: /forms/d/FORM_ID/edit
-    /\/forms\/d\/([a-zA-Z0-9-_]{25,})\/edit/,
-    // View form: /forms/d/FORM_ID/viewform  
-    /\/forms\/d\/([a-zA-Z0-9-_]{25,})\/viewform/,
-    // Published form: /forms/d/e/RESPONSE_ID/viewform - CONVERT TO FORM_ID
-    /\/forms\/d\/e\/([a-zA-Z0-9-_]{25,})\/viewform/,
-    // General form: /forms/d/FORM_ID
-    /\/forms\/d\/([a-zA-Z0-9-_]{25,})/
+    // 1. Edit form (HIGHEST PRIORITY): /forms/d/FORM_ID/edit
+    {
+      pattern: /\/forms\/d\/([a-zA-Z0-9-_]{25,})\/edit/,
+      type: 'edit',
+      priority: 1
+    },
+    // 2. Direct form access: /forms/d/FORM_ID/
+    {
+      pattern: /\/forms\/d\/([a-zA-Z0-9-_]{25,})\/?$/,
+      type: 'direct',
+      priority: 2
+    },
+    // 3. View form: /forms/d/FORM_ID/viewform (older format)
+    {
+      pattern: /\/forms\/d\/([a-zA-Z0-9-_]{25,})\/viewform/,
+      type: 'view',
+      priority: 3
+    }
   ];
   
-  for (let i = 0; i < patterns.length; i++) {
-    const pattern = patterns[i];
+  // Check patterns in priority order
+  for (const { pattern, type, priority } of patterns) {
     const match = url.match(pattern);
     
     if (match && match[1]) {
       const extractedId = match[1];
-      console.log(`✅ Pattern ${i + 1} matched, extracted ID:`, extractedId);
+      console.log(`✅ Form ID found using ${type} URL pattern (priority ${priority}):`, extractedId);
       
-      // For published forms (pattern index 2), we need to handle the response ID differently
-      if (i === 2) {
-        console.warn('⚠️ This appears to be a published form response URL. You may need the edit URL instead.');
-        console.warn('💡 Try using the form edit URL: https://docs.google.com/forms/d/FORM_ID/edit');
-        // For now, return the extracted ID and let the API handle it
+      if (type === 'edit') {
+        console.log('🎯 Perfect! Edit URL detected - this is the most reliable format.');
+      } else {
+        console.warn(`⚠️ Using ${type} URL format. Edit URL is recommended for best reliability.`);
       }
       
       return extractedId;
     }
   }
   
-  console.error('❌ No valid Form ID found in URL');
-  return null;
+  // Check for problematic response URLs and provide clear error
+  const responseUrlPattern = /\/forms\/d\/e\/([a-zA-Z0-9-_]{25,})\/viewform/;
+  const responseMatch = url.match(responseUrlPattern);
+  
+  if (responseMatch) {
+    console.error('❌ INVALID URL TYPE: This is a response/published form URL');
+    console.error('💡 SOLUTION: Please use the EDIT URL instead');
+    console.error('📝 How to get edit URL:');
+    console.error('   1. Go to https://forms.google.com');
+    console.error('   2. Find your form and click the EDIT button (pencil icon)');
+    console.error('   3. Copy the URL from address bar (should end with /edit)');
+    throw new Error('Invalid URL: Please use the form EDIT URL, not the response URL. Go to forms.google.com, open your form for editing, and copy that URL.');
+  }
+  
+  console.error('❌ No valid Google Form ID found in URL');
+  console.error('💡 Expected URL format: https://docs.google.com/forms/d/FORM_ID/edit');
+  throw new Error('Invalid Google Form URL format. Please use the edit URL from forms.google.com');
 };
