@@ -625,23 +625,56 @@ const structure = await fetchGoogleFormStructure(formId, user.id);
         {/* Step 1: URL Input */}
         {step === 'url' && (
           <form onSubmit={handleUrlSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Google Form URL *
-              </label>
-              <input
-                type="url"
-                value={formData.form_url}
-                onChange={(e) => setFormData(prev => ({ ...prev, form_url: e.target.value }))}
-                placeholder="https://docs.google.com/forms/d/YOUR_FORM_ID/edit"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-                required
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Copy the URL from your Google Form (edit or view mode)
-              </p>
-            </div>
 
+            <div>
+  <label className="block text-sm font-medium text-gray-700 mb-2">
+    Google Form URL * <span className="text-red-600 font-bold">(EDIT URL ONLY)</span>
+  </label>
+  <input
+    type="url"
+    value={formData.form_url}
+    onChange={(e) => setFormData(prev => ({ ...prev, form_url: e.target.value }))}
+    placeholder="https://docs.google.com/forms/d/YOUR_FORM_ID/edit"
+    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+    required
+  />
+  
+  {/* Enhanced Instructions */}
+  <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+    <p className="font-medium text-blue-900 mb-2">📝 How to get the correct URL:</p>
+    <ol className="list-decimal list-inside text-blue-800 space-y-1">
+      <li>Go to <a href="https://forms.google.com" target="_blank" className="underline font-medium">forms.google.com</a></li>
+      <li>Find your form and click the <strong>EDIT button</strong> (pencil icon)</li>
+      <li>Copy the URL from your browser's address bar</li>
+      <li>Make sure the URL ends with <code className="bg-blue-100 px-1 rounded">/edit</code></li>
+    </ol>
+  </div>
+  
+  {/* Warning about wrong URLs */}
+  <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm">
+    <p className="font-medium text-red-900 mb-1">❌ Don't use these URLs:</p>
+    <ul className="text-red-800 space-y-1 text-xs">
+      <li>• URLs with <code className="bg-red-100 px-1 rounded">/d/e/LONG_ID/viewform</code> (response URLs)</li>
+      <li>• URLs ending with <code className="bg-red-100 px-1 rounded">?usp=dialog</code> (sharing URLs)</li>
+      <li>• URLs from "Send" or "Share" buttons</li>
+    </ul>
+  </div>
+  
+  {/* Success indicator */}
+  {formData.form_url.includes('/edit') && (
+    <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">
+      ✅ Perfect! This looks like a valid edit URL.
+    </div>
+  )}
+  
+  {/* Error indicator */}
+  {(formData.form_url.includes('/d/e/') || formData.form_url.includes('viewform')) && (
+    <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+      ❌ This appears to be a response URL. Please use the edit URL instead.
+    </div>
+  )}
+</div>
+            
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Form Name (Optional)
