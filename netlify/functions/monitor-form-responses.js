@@ -380,33 +380,146 @@ const fetchFormResponsesFromAPI = async (formId, adminId) => {
   }
 };
 
-// Extract payment data from Google Form response
+// Extract payment data from Google Form response with smart field detection
 const extractPaymentDataFromResponse = (response, fieldMapping, form) => {
   try {
+    console.log(`🔍 Smart payment detection for response: ${response.responseId}`);
     const answers = response.answers || {};
     
-    // Extract data based on field mappings
-    const email = answers[fieldMapping.email_field_id]?.textAnswers?.answers?.[0]?.value || '';
-    const productResponse = answers[fieldMapping.product_field_id]?.textAnswers?.answers?.[0]?.value || '';
-    const customerName = answers[fieldMapping.name_field_id]?.textAnswers?.answers?.[0]?.value || '';
-    const phone = answers[fieldMapping.phone_field_id]?.textAnswers?.answers?.[0]?.value || '';
+    // Step 1: Try to find payment field using smart detection
+    let productName = null;
+    let productPrice = 0;
+    let paymentFieldFound = false;
+    
+    // Method 1: Try mapped field first if exists
+    if (fieldMapping?.product_field_id) {
+      const mappedFieldId = fieldMapping.product_field_id.replace('entry.', '');
+      const mappedValue = answers[mappedFieldId]?.textAnswers?.answers?.[0]?.value;
+      
+      if (mappedValue) {
+        console.log(`📋 Trying mapped field ${mappedFieldId}: ${mappedValue}`);
+        const mappedMatch = mappedValue.match(/^(.+?)\s*-\s*₹(\d+)$/);
+        if (mappedMatch) {
+          productName = mappedMatch[1].trim();
+          productPrice = parseInt(mappedMatch[2]);
+          paymentFieldFound = true;
+          console.log(`✅ Found payment data in mapped field: ${productName} - ₹${productPrice}`);
+        }
+      }
+    }
+    
+    // Method 2: Smart detection - scan ALL fields for ₹ pattern if mapping failed
+    if (!paymentFieldFound) {
+      console.log('🔍 Scanning all fields for ₹ pattern...');
+      
+      for (const [fieldId, answerData] of Object.entries(answers)) {
+        const value = answerData.textAnswers?.answers?.[0]?.value;
+        
+        if (value && typeof value === 'string') {
+          console.log(`🔍 Checking field ${fieldId}: ${value}`);
+          
+          // Look for pattern: "Something - ₹Number"
+          const patterns = [
+            /^(.+?)\s*-\s*₹(\d+)$/, // "Product - ₹999"
+            /^(.+?)\s*₹(\d+)$/, // "Product ₹999"
+            /^(.+?)\s*-\s*Rs\.?\s*(\d+)$/, // "Product - Rs.999"
+          ];
+          
+          for (const pattern of patterns) {
+            const match = value.match(pattern);
+            if (match) {
+              productName = match[1].trim();
+              productPrice = parseInt(match[2]);
+              paymentFieldFound = true;
+              console.log(`✅ FOUND payment field! Field ${fieldId}: ${productName} - ₹${productPrice}`);
+              break;
+            }
+          }
+          
+          if (paymentFieldFound) break;
+        }
+      }
+    }
+    
+    // Step 2: Extract other fields with smart detection fallback
+    let email = null;
+    let customerName = null;
+    let phone = null;
+    
+    // Try mapped email field first
+    if (fieldMapping?.email_field_id) {
+      const emailFieldId = fieldMapping.email_field_id.replace('entry.', '');
+      email = answers[emailFieldId]?.textAnswers?.answers?.[0]?.value;
+    }
+    
+    // Auto-detect email if mapping failed
+    if (!email) {
+      for (const [fieldId, answerData] of Object.entries(answers)) {
+        const value = answerData.textAnswers?.answers?.[0]?.value;
+        if (value && value.includes('@') && value.includes('.')) {
+          email = value;
+          console.log(`📧 Auto-detected email in field ${fieldId}: ${email}`);
+          break;
+        }
+      }
+    }
+    
+    // Try mapped name field first
+    if (fieldMapping?.name_field_id) {
+      const nameFieldId = fieldMapping.name_field_id.replace('entry.', '');
+      customerName = answers[nameFieldId]?.textAnswers?.answers?.[0]?.value;
+    }
+    
+    // Auto-detect name if mapping failed
+    if (!customerName) {
+      for (const [fieldId, answerData] of Object.entries(answers)) {
+        const value = answerData.textAnswers?.answers?.[0]?.value;
+        if (value && 
+            !value.includes('@') && 
+            !value.includes('₹') && 
+            !/^\d+$/.test(value) && 
+            !value.includes('Cashfree') &&
+            value.length > 1 && 
+            value.length < 50) {
+          customerName = value;
+          console.log(`👤 Auto-detected name in field ${fieldId}: ${customerName}`);
+          break;
+        }
+      }
+    }
+    
+    // Try mapped phone field
+    if (fieldMapping?.phone_field_id) {
+      const phoneFieldId = fieldMapping.phone_field_id.replace('entry.', '');
+      phone = answers[phoneFieldId]?.textAnswers?.answers?.[0]?.value;
+    }
+    
+    // Auto-detect phone if mapping failed
+    if (!phone) {
+      for (const [fieldId, answerData] of Object.entries(answers)) {
+        const value = answerData.textAnswers?.answers?.[0]?.value;
+        if (value && /^\d{10,}$/.test(value.replace(/\s|-/g, ''))) {
+          phone = value;
+          console.log(`📞 Auto-detected phone in field ${fieldId}: ${phone}`);
+          break;
+        }
+      }
+    }
 
-    // Parse product and price from response like "Course - ₹2999"
-    const productMatch = productResponse.match(/^(.+?)\s*-\s*₹(\d+)$/);
-    const productName = productMatch ? productMatch[1].trim() : productResponse;
-    const productPrice = productMatch ? parseInt(productMatch[2]) : 0;
-
-    return {
-      email: email.trim(),
-      productName: productName.trim(),
-      productPrice: productPrice,
-      customerName: customerName.trim(),
-      phone: phone.trim(),
+    const result = {
+      email: email?.trim() || '',
+      productName: productName?.trim() || '',
+      productPrice: productPrice || 0,
+      customerName: customerName?.trim() || 'Customer',
+      phone: phone?.trim() || '',
       responseId: response.responseId,
       submittedAt: response.createTime,
       formId: form.form_id,
       formName: form.form_name
     };
+    
+    console.log(`📊 Extracted data:`, result);
+    return result;
 
   } catch (error) {
     console.error('Error extracting payment data:', error);
