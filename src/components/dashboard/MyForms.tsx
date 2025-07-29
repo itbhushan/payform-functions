@@ -431,8 +431,36 @@ const FormCard: React.FC<{
   );
 };
 
-// REPLACE the existing AddFormModal component in MyForms.tsx with this:
+// ADD THIS COMPONENT BEFORE AddFormModal
+const URLFormatHelper: React.FC = () => (
+  <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+    <h4 className="font-medium text-gray-900 mb-3">📋 URL Format Examples</h4>
+    
+    <div className="space-y-3 text-sm">
+      <div className="flex items-start space-x-2">
+        <span className="text-green-500 font-bold text-lg">✅</span>
+        <div>
+          <p className="font-medium text-green-700">Correct - Edit URL:</p>
+          <code className="block mt-1 text-xs bg-green-100 p-2 rounded text-green-800 break-all">
+            https://docs.google.com/forms/d/1ZbHjoqP8iTGAHw9wLm-NKNQdF2WBPJW-4yT1tyvZmbk/edit
+          </code>
+        </div>
+      </div>
+      
+      <div className="flex items-start space-x-2">
+        <span className="text-red-500 font-bold text-lg">❌</span>
+        <div>
+          <p className="font-medium text-red-700">Wrong - Response URL:</p>
+          <code className="block mt-1 text-xs bg-red-100 p-2 rounded text-red-800 break-all">
+            https://docs.google.com/forms/d/e/1FAIpQLSdu_sTrQcY3zUICIhA075jCR_gTdtAtA8gaXrX5nbfV2pdIHw/viewform
+          </code>
+        </div>
+      </div>
+    </div>
+  </div>
+);
 
+// REPLACE the existing AddFormModal component in MyForms.tsx with this:
 const AddFormModal: React.FC<{ onClose: () => void; onSuccess: () => void }> = ({ onClose, onSuccess }) => {
   const { user } = useAuth();
  
@@ -466,13 +494,22 @@ const AddFormModal: React.FC<{ onClose: () => void; onSuccess: () => void }> = (
     e.preventDefault();
     setError('');
     
-    // Extract form ID from URL
-    const formId = extractGoogleFormId(formData.form_url);
-    if (!formId) {
-      setError('Invalid Google Form URL. Please check the URL format.');
-      return;
-    }
+// Enhanced form ID extraction with validation
+let formId;
+try {
+  formId = extractGoogleFormId(formData.form_url);
+  if (!formId) {
+    setError('Invalid Google Form URL format. Please use the edit URL from forms.google.com');
+    return;
+  }
+} catch (error) {
+  setError(error.message);
+  setLoading(false);
+  return;
+}
 
+console.log('✅ Successfully extracted form ID:', formId);
+    
     setLoading(true);
     try {
       // Check if form already exists
@@ -673,6 +710,8 @@ const structure = await fetchGoogleFormStructure(formId, user.id);
       ❌ This appears to be a response URL. Please use the edit URL instead.
     </div>
   )}
+  {/* Add URL Format Helper */}
+  <URLFormatHelper />
 </div>
             
             <div>
