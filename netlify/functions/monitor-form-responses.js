@@ -117,70 +117,166 @@ exports.handler = async (event, context) => {
   }
 };
 
+// Auto-refresh expired tokens
+const ensureValidToken = async (supabase, adminId) => {
+  try {
+    const { data: tokenData } = await supabase
+      .from('google_auth_tokens')
+      .select('*')
+      .eq('admin_id', adminId)
+      .single();
+
+    if (!tokenData) return false;
+
+    const expiresAt = new Date(tokenData.token_expires_at);
+    const now = new Date();
+    const isExpired = expiresAt <= now;
+
+    if (isExpired) {
+      console.log(`🔄 Auto-refreshing expired token for admin ${adminId}`);
+      
+      // Call your refresh token function
+      const response = await fetch(`${process.env.URL}/.netlify/functions/google-oauth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'refreshToken',
+          adminId: adminId
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log(`✅ Token auto-refreshed for admin ${adminId}`);
+        return true;
+      } else {
+        console.log(`❌ Token refresh failed for admin ${adminId}`);
+        return false;
+      }
+    }
+
+    return true; // Token is still valid
+  } catch (error) {
+    console.error(`❌ Error checking token for admin ${adminId}:`, error);
+    return false;
+  }
+};
+
 // Get all active forms with field mappings and Google authentication
 const getActiveFormsWithAuth = async () => {
   try {
-    // First get active forms
+    console.log('🔍 Looking for active forms with authentication...');
+    
+    // Get active forms first
     const { data: forms, error: formsError } = await supabase
       .from('form_configs')
       .select('*')
       .eq('is_active', true);
 
-    if (formsError) throw formsError;
+    if (formsError) {
+      console.error('❌ Error fetching forms:', formsError);
+      throw formsError;
+    }
 
     console.log(`📋 Found ${forms?.length || 0} active forms`);
 
     if (!forms || forms.length === 0) {
+      console.log('⚠️ No active forms found in database');
       return [];
     }
 
-    // Get field mappings for each form
-    const formsWithMappings = [];
+    // Log each form for debugging
+    forms.forEach((form, index) => {
+      console.log(`📝 Form ${index + 1}: ${form.form_name} (ID: ${form.form_id})`);
+      console.log(`   Admin ID: ${form.admin_id}`);
+      console.log(`   Active: ${form.is_active}`);
+    });
+
+    // Get authentication status for each form admin
+    const formsWithAuth = [];
     
     for (const form of forms) {
-      // Get field mapping
-      const { data: fieldMapping } = await supabase
+      console.log(`🔐 Checking auth for admin: ${form.admin_id}`);
+      
+      // Check if this admin has Google auth tokens
+      const { data: authTokens, error: authError } = await supabase
+        .from('google_auth_tokens')
+        .select('*')
+        .eq('admin_id', form.admin_id)
+        .single();
+
+      if (authError) {
+        console.log(`⚠️ No auth tokens for admin ${form.admin_id}:`, authError.message);
+        continue;
+      }
+
+      if (!authTokens) {
+        console.log(`⚠️ No auth tokens found for admin ${form.admin_id}`);
+        continue;
+      }
+
+      console.log(`✅ Found auth tokens for admin ${form.admin_id}`);
+      
+      // Check if token is valid (not expired)
+      const expiresAt = new Date(authTokens.token_expires_at);
+      const now = new Date();
+      const isExpired = expiresAt <= now;
+      
+      console.log(`🕐 Token expires at: ${expiresAt.toISOString()}`);
+      console.log(`🕐 Current time: ${now.toISOString()}`);
+      console.log(`🔍 Token expired: ${isExpired}`);
+
+      if (isExpired) {
+        console.log(`⚠️ Token expired for admin ${form.admin_id}, attempting refresh...`);
+        // Could add auto-refresh logic here
+        continue;
+      }
+
+      // Get field mappings for this form
+      const { data: fieldMapping, error: mappingError } = await supabase
         .from('form_field_mappings')
         .select('*')
         .eq('form_id', form.form_id)
         .single();
 
+      if (mappingError || !fieldMapping) {
+        console.log(`⚠️ No field mapping for form ${form.form_id}:`, mappingError?.message);
+        continue;
+      }
+
+      console.log(`✅ Found field mapping for form ${form.form_id}`);
+
       // Get admin info
-      const { data: adminInfo } = await supabase
+      const { data: adminInfo, error: adminError } = await supabase
         .from('form_admins')
         .select('email, name')
         .eq('id', form.admin_id)
         .single();
 
-      // Get Google auth token
-      const { data: authToken } = await supabase
-        .from('google_auth_tokens')
-        .select('access_token, refresh_token')
-        .eq('admin_id', form.admin_id)
-        .single();
-
-      // Only include forms with complete setup
-      if (fieldMapping && adminInfo && authToken) {
-        formsWithMappings.push({
-          ...form,
-          form_field_mappings: [fieldMapping],
-          form_admins: [adminInfo],
-          google_auth_tokens: [authToken]
-        });
-      } else {
-        console.warn(`⚠️ Form ${form.form_name} missing required data:`, {
-          hasFieldMapping: !!fieldMapping,
-          hasAdminInfo: !!adminInfo,
-          hasAuthToken: !!authToken
-        });
+      if (adminError || !adminInfo) {
+        console.log(`⚠️ No admin info for ${form.admin_id}:`, adminError?.message);
+        continue;
       }
+
+      console.log(`✅ Found admin info for ${form.admin_id}: ${adminInfo.email}`);
+
+      // Add form with all required data
+      formsWithAuth.push({
+        ...form,
+        form_field_mappings: [fieldMapping],
+        form_admins: [adminInfo],
+        google_auth_tokens: [authTokens]
+      });
+
+      console.log(`✅ Form ${form.form_name} added to monitoring list`);
     }
 
-    console.log(`✅ ${formsWithMappings.length} forms have complete setup`);
-    return formsWithMappings;
+    console.log(`🎯 Final result: ${formsWithAuth.length} forms with complete setup`);
+    return formsWithAuth;
 
   } catch (error) {
-    console.error('❌ Error getting active forms with auth:', error);
+    console.error('❌ Error getting forms with auth:', error);
     return [];
   }
 };
