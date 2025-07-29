@@ -1,20 +1,7 @@
-// netlify/functions/dashboard-data.js - FIXED VERSION
+// netlify/functions/dashboard-data.js - CORRECTED VERSION
 const { createClient } = require('@supabase/supabase-js');
 
 exports.handler = async (event, context) => {
-    // Add this line to parse adminId from request body
-  const { adminId } = JSON.parse(event.body || '{}');
-  
-  if (!adminId) {
-    return {
-      statusCode: 400,
-      headers,
-      body: JSON.stringify({ 
-        error: 'admin_id is required',
-        message: 'Please provide adminId in request body' 
-      })
-    };
-    
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
@@ -28,16 +15,34 @@ exports.handler = async (event, context) => {
 
   try {
     console.log('🚀 Dashboard data request started');
-    console.log('Query params:', event.queryStringParameters);
+    
+    // Get admin_id from request body (POST) or query params (GET)
+    let adminId;
+    
+    if (event.httpMethod === 'POST' && event.body) {
+      const body = JSON.parse(event.body);
+      adminId = body.adminId;
+    } else {
+      adminId = event.queryStringParameters?.admin_id;
+    }
+
+    if (!adminId) {
+      console.error('❌ No admin_id provided');
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ 
+          error: 'admin_id is required',
+          message: 'Please provide adminId in request body or admin_id in query params'
+        })
+      };
+    }
+
+    console.log('Admin ID:', adminId);
 
     // Environment variables
     const SUPABASE_URL = process.env.SUPABASE_URL;
     const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    console.log('Environment check:', {
-      SUPABASE_URL: !!SUPABASE_URL,
-      SUPABASE_SERVICE_ROLE_KEY: !!SUPABASE_SERVICE_ROLE_KEY
-    });
 
     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
       console.error('❌ Missing environment variables');
@@ -50,22 +55,6 @@ exports.handler = async (event, context) => {
         })
       };
     }
-
-// Get admin_id from query parameters - NO DEFAULT!
-const adminId = event.queryStringParameters?.admin_id;
-
-if (!adminId) {
-  console.error('❌ No admin_id provided');
-  return {
-    statusCode: 400,
-    headers,
-    body: JSON.stringify({ 
-      error: 'admin_id is required',
-      received_params: event.queryStringParameters
-    })
-  };
-}
-    console.log('Admin ID:', adminId);
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -89,6 +78,10 @@ if (!adminId) {
 
     console.log('✅ Database connected successfully');
 
+    // Fetch forms data 
+    console.log('📝 Fetching forms data...');
+    const forms = await fetchFormsData(supabase, adminId);
+
     // Fetch dashboard statistics
     console.log('📊 Fetching dashboard stats...');
     const stats = await fetchDashboardStats(supabase, adminId);
@@ -108,6 +101,7 @@ if (!adminId) {
       headers,
       body: JSON.stringify({
         success: true,
+        forms,
         stats,
         transactions,
         commissions,
@@ -129,6 +123,31 @@ if (!adminId) {
     };
   }
 };
+
+// ADD this new function to fetch forms data
+async function fetchFormsData(supabase, adminId) {
+  try {
+    console.log('📝 Fetching forms for admin:', adminId);
+
+    const { data: forms, error } = await supabase
+      .from('form_configs')
+      .select('*')
+      .eq('admin_id', adminId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Forms fetch error:', error);
+      throw error;
+    }
+
+    console.log('Found forms:', forms?.length || 0);
+    return forms || [];
+
+  } catch (error) {
+    console.error('Error fetching forms:', error);
+    return [];
+  }
+}
 
 async function fetchDashboardStats(supabase, adminId) {
   try {
@@ -250,7 +269,6 @@ async function fetchCommissionData(supabase, adminId) {
 
     if (error) {
       console.error('Commissions fetch error:', error);
-      // Don't throw error, just return empty data
       console.log('⚠️ Commissions table might not exist yet, returning empty data');
       return {
         totalCommissions: 0,
