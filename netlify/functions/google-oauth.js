@@ -70,7 +70,8 @@ const generateAuthUrl = async (adminId) => {
       access_type: 'offline',
       scope: [
         'https://www.googleapis.com/auth/forms.responses.readonly',
-        'https://www.googleapis.com/auth/forms.body.readonly'
+        'https://www.googleapis.com/auth/forms.body.readonly',
+        'https://www.googleapis.com/auth/gmail.send'
       ],
       prompt: 'consent',
       state: adminId // Pass admin ID in state parameter
