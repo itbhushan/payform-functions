@@ -559,7 +559,7 @@ const createPaymentOrder = async (paymentData, adminId) => {
       return {
         success: true,
         orderId: result.order_id,
-        paymentLink: result.payment_url
+        paymentLink: result.checkout_url
       };
     } else {
       throw new Error(result.error || 'Failed to create payment order');
