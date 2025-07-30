@@ -610,27 +610,60 @@ const createPaymentOrder = async (paymentData, adminId) => {
 // Send payment email to customer
 const sendPaymentEmail = async (paymentData, paymentLink, adminInfo) => {
   try {
-    console.log(`📧 Sending payment email to ${paymentData.email}`);
+    console.log(`📧 Attempting to send payment email to ${paymentData.email}`);
 
     // Email template
     const emailHtml = generatePaymentEmailTemplate(paymentData, paymentLink, adminInfo);
 
-    // For production, you would integrate with your email service here
-    // Options: Gmail API, SendGrid, Mailgun, AWS SES, etc.
+    // Send actual email using Supabase Edge Function
+    console.log('📧 Calling Supabase email service...');
     
-    // For now, log the email content (replace with actual email sending)
-    console.log(`📧 Payment email details:`);
-    console.log(`To: ${paymentData.email}`);
-    console.log(`Subject: Complete your payment - ${paymentData.productName}`);
-    console.log(`Payment Link: ${paymentLink}`);
-    
-    // TODO: Replace with actual email sending service
-    // await sendEmailViaService(paymentData.email, 'Payment Required', emailHtml);
+    try {
+      const emailResponse = await fetch(`${process.env.SUPABASE_URL}/functions/v1/send-payment-email`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+        },
+        body: JSON.stringify({
+          to: paymentData.email,
+          subject: `Complete your payment - ${paymentData.productName}`,
+          html: emailHtml,
+          paymentLink: paymentLink,
+          productName: paymentData.productName,
+          amount: paymentData.productPrice,
+          customerName: paymentData.customerName || 'Customer',
+          formName: paymentData.formName
+        })
+      });
 
-    return { success: true };
+      const emailResult = await emailResponse.json();
+      
+      if (emailResult.success) {
+        console.log(`✅ Payment email sent successfully to ${paymentData.email}`);
+        return { success: true };
+      } else {
+        console.error(`❌ Failed to send email to ${paymentData.email}:`, emailResult.error);
+        return { success: false, error: emailResult.error };
+      }
+      
+    } catch (emailError) {
+      console.error('❌ Email service error:', emailError);
+      
+      // Fallback: Log email details for manual processing
+      console.log(`📧 FALLBACK - Email details for manual processing:`);
+      console.log(`To: ${paymentData.email}`);
+      console.log(`Subject: Complete your payment - ${paymentData.productName}`);
+      console.log(`Payment Link: ${paymentLink}`);
+      console.log(`Customer: ${paymentData.customerName}`);
+      console.log(`Amount: ₹${paymentData.productPrice}`);
+      
+      // Still return success so processing continues
+      return { success: true, fallback: true };
+    }
 
   } catch (error) {
-    console.error('Error sending payment email:', error);
+    console.error('Error in sendPaymentEmail function:', error);
     return { success: false, error: error.message };
   }
 };
