@@ -200,26 +200,74 @@ const getActiveFormsWithAuth = async () => {
       console.log(`🔐 Checking auth for admin: ${form.admin_id}`);
       
       // Check if this admin has Google auth tokens
-      const { data: authData, error: authError } = await supabase
-        .from('google_auth_tokens')
-        .select('*')
-        .eq('admin_id', form.admin_id)
-        .single();
+// Check if this admin has Google auth tokens
+const { data: authData, error: authError } = await supabase
+  .from('google_auth_tokens')
+  .select('*')
+  .eq('admin_id', form.admin_id)
+  .single();
 
-      if (authError) {
-        console.log(`⚠️ No auth tokens for admin ${form.admin_id}:`, authError.message);
-        continue;
-      }
+if (authError) {
+  console.log(`⚠️ No auth tokens for admin ${form.admin_id}:`, authError.message);
+  continue;
+}
 
-      if (!authData) {
-        console.log(`⚠️ No auth tokens found for admin ${form.admin_id}`);
-        continue;
-      }
+if (!authData) {
+  console.log(`⚠️ No auth tokens found for admin ${form.admin_id}`);
+  continue;
+}
 
-      console.log(`✅ Found auth tokens for admin ${form.admin_id}`);
-      
-      // Check if token is valid (not expired)
-      const expiresAt = new Date(authTokens.token_expires_at);
+console.log(`✅ Found auth tokens for admin ${form.admin_id}`);
+
+// Check if token is valid (not expired) with auto-refresh
+let authTokens = authData; // Store the tokens in a mutable variable
+const expiresAt = new Date(authTokens.token_expires_at);
+const now = new Date();
+const isExpired = expiresAt <= now;
+
+console.log(`🕐 Token expires at: ${expiresAt.toISOString()}`);
+console.log(`🕐 Current time: ${now.toISOString()}`);
+console.log(`🔍 Token expired: ${isExpired}`);
+
+if (isExpired) {
+  console.log(`⚠️ Token expired for admin ${form.admin_id}, attempting auto-refresh...`);
+  
+  // Auto-refresh the token
+  const refreshSuccess = await ensureValidToken(supabase, form.admin_id);
+  
+  if (!refreshSuccess) {
+    console.log(`❌ Auto-refresh failed for admin ${form.admin_id}, skipping`);
+    continue;
+  }
+  
+  console.log(`✅ Token auto-refreshed for admin ${form.admin_id}`);
+  
+  // Re-fetch the updated token after refresh
+  const { data: refreshedTokens, error: refreshError } = await supabase
+    .from('google_auth_tokens')
+    .select('*')
+    .eq('admin_id', form.admin_id)
+    .single();
+    
+  if (refreshError || !refreshedTokens) {
+    console.log(`❌ Failed to get refreshed token for admin ${form.admin_id}:`, refreshError?.message);
+    continue;
+  }
+  
+  console.log(`✅ Using refreshed token for admin ${form.admin_id}`);
+  authTokens = refreshedTokens; // Use the refreshed token
+  
+  // Update expiry check with new token
+  const newExpiresAt = new Date(refreshedTokens.token_expires_at);
+  const newIsExpired = newExpiresAt <= new Date();
+  
+  if (newIsExpired) {
+    console.log(`❌ Refreshed token still expired for admin ${form.admin_id}, skipping`);
+    continue;
+  }
+  
+  console.log(`✅ Refreshed token is valid until: ${newExpiresAt.toISOString()}`);
+}
       const now = new Date();
       const isExpired = expiresAt <= now;
       
