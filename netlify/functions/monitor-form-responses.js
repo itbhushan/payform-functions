@@ -633,7 +633,7 @@ const sendPaymentEmail = async (paymentData, paymentLink, adminInfo) => {
           productName: paymentData.productName,
           amount: paymentData.productPrice,
           customerName: paymentData.customerName || 'Customer',
-          formName: paymentData.formName
+          formName: paymentData.formName,
           adminId: adminInfo.adminId
         })
       });
