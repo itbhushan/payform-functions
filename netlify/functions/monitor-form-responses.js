@@ -607,6 +607,12 @@ const createPaymentOrder = async (paymentData, adminId) => {
   }
 };
 
+// Add this debug logging BEFORE the fetch call to send-payment-email
+console.log('🔍 DEBUG - adminInfo object:', adminInfo);
+console.log('🔍 DEBUG - adminInfo.adminId:', adminInfo.adminId);
+console.log('🔍 DEBUG - adminInfo.id:', adminInfo.id);
+console.log('🔍 DEBUG - Available properties:', Object.keys(adminInfo));
+
 // Send payment email to customer
 const sendPaymentEmail = async (paymentData, paymentLink, adminInfo) => {
   try {
@@ -634,7 +640,7 @@ const sendPaymentEmail = async (paymentData, paymentLink, adminInfo) => {
           amount: paymentData.productPrice,
           customerName: paymentData.customerName || 'Customer',
           formName: paymentData.formName,
-          adminId: adminInfo.adminId
+          adminId: adminInfo.adminId || adminInfo.id || adminInfo.admin_id || '75db4a76-f775-457f-a551-370a03d70a3b'  // 🔧 Multiple fallbacks
         })
       });
 
