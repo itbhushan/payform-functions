@@ -607,16 +607,16 @@ const createPaymentOrder = async (paymentData, adminId) => {
   }
 };
 
-// Add this debug logging BEFORE the fetch call to send-payment-email
-console.log('🔍 DEBUG - adminInfo object:', adminInfo);
-console.log('🔍 DEBUG - adminInfo.adminId:', adminInfo.adminId);
-console.log('🔍 DEBUG - adminInfo.id:', adminInfo.id);
-console.log('🔍 DEBUG - Available properties:', Object.keys(adminInfo));
-
 // Send payment email to customer
 const sendPaymentEmail = async (paymentData, paymentLink, adminInfo) => {
   try {
     console.log(`📧 Attempting to send payment email to ${paymentData.email}`);
+
+    // Add this debug logging BEFORE the fetch call to send-payment-email
+    console.log('🔍 DEBUG - adminInfo object:', adminInfo);
+    console.log('🔍 DEBUG - adminInfo.adminId:', adminInfo.adminId);
+    console.log('🔍 DEBUG - adminInfo.id:', adminInfo.id);
+    console.log('🔍 DEBUG - Available properties:', Object.keys(adminInfo));
 
     // Email template
     const emailHtml = generatePaymentEmailTemplate(paymentData, paymentLink, adminInfo);
@@ -641,8 +641,7 @@ const sendPaymentEmail = async (paymentData, paymentLink, adminInfo) => {
           customerName: paymentData.customerName || 'Customer',
           formName: paymentData.formName,
           adminId: '75db4a76-f775-457f-a551-370a03d70a3b'
-          //adminId: adminInfo.adminId || adminInfo.id || adminInfo.admin_id || '75db4a76-f775-457f-a551-370a03d70a3b'  // 🔧 Multiple fallbacks
-        })
+       })
       });
 
       const emailResult = await emailResponse.json();
