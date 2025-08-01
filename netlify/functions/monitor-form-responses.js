@@ -343,12 +343,13 @@ const processFormResponses = async (form) => {
         
         if (isValidPaymentData(paymentData)) {
           // Create Cashfree order
-          const orderResult = await createPaymentOrder(paymentData, form.admin_id);
-          
-          if (orderResult.success) {
-            // Send payment email
-            await sendPaymentEmail(paymentData, orderResult.paymentLink, form.form_admins[0]);
-            
+        // Create Cashfree order
+        const orderResult = await createPaymentOrder(paymentData, form.admin_id);
+
+            if (orderResult.success) {
+            // Send payment email with adminId
+            await sendPaymentEmail(paymentData, orderResult.paymentLink, form.form_admins[0], form.admin_id);
+  
             // Mark response as processed
             await markResponseProcessed(response.responseId, form.form_id, orderResult.orderId);
             
@@ -608,7 +609,7 @@ const createPaymentOrder = async (paymentData, adminId) => {
 };
 
 // Send payment email to customer
-const sendPaymentEmail = async (paymentData, paymentLink, adminInfo) => {
+const sendPaymentEmail = async (paymentData, paymentLink, adminInfo, adminId) => {
   try {
     console.log(`📧 Attempting to send payment email to ${paymentData.email}`);
 
@@ -632,16 +633,16 @@ const sendPaymentEmail = async (paymentData, paymentLink, adminInfo) => {
           'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
         },
         body: JSON.stringify({
-          to: paymentData.email,
-          subject: `Complete your payment - ${paymentData.productName}`,
-          html: emailHtml,
-          paymentLink: paymentLink,
-          productName: paymentData.productName,
-          amount: paymentData.productPrice,
-          customerName: paymentData.customerName || 'Customer',
-          formName: paymentData.formName,
-          adminId: adminInfo.adminId || adminInfo.id || adminInfo.admin_id  // ✅ Dynamic for any admin
-       })
+        to: paymentData.email,
+        subject: `Complete your payment - ${paymentData.productName}`,
+        html: emailHtml,
+        paymentLink: paymentLink,
+        productName: paymentData.productName,
+        amount: paymentData.productPrice,
+        customerName: paymentData.customerName || 'Customer',
+        formName: paymentData.formName,
+        adminId: adminId  // 🆕 Use the passed adminId parameter
+      })
       });
 
       const emailResult = await emailResponse.json();
