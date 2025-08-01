@@ -640,7 +640,7 @@ const sendPaymentEmail = async (paymentData, paymentLink, adminInfo) => {
           amount: paymentData.productPrice,
           customerName: paymentData.customerName || 'Customer',
           formName: paymentData.formName,
-          adminId: '75db4a76-f775-457f-a551-370a03d70a3b'
+          adminId: adminInfo.adminId || adminInfo.id || adminInfo.admin_id  // ✅ Dynamic for any admin
        })
       });
 
