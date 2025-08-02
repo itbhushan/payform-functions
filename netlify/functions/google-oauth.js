@@ -36,6 +36,8 @@ exports.handler = async (event, context) => {
         return await refreshAccessToken(adminId);
       case 'checkAuth':
         return await checkAuthStatus(adminId);
+      case 'revokeAccess':
+        return await revokeGoogleAccess(adminId);  // 🆕 ADD this line
       default:
         return {
           statusCode: 400,
@@ -262,6 +264,63 @@ const checkAuthStatus = async (adminId) => {
       body: JSON.stringify({
         success: false,
         error: 'Failed to check authentication status'
+      })
+    };
+  }
+};
+// Add this function at the end of google-oauth.js file
+const revokeGoogleAccess = async (adminId) => {
+  try {
+    console.log(`🚪 Revoking Google access for admin: ${adminId}`);
+
+    // Get stored tokens to revoke
+    const { data: tokenData, error: fetchError } = await supabase
+      .from('google_auth_tokens')
+      .select('access_token, refresh_token')
+      .eq('admin_id', adminId)
+      .single();
+
+    if (tokenData?.access_token) {
+      // Revoke the access token with Google
+      try {
+        await fetch(`https://oauth2.googleapis.com/revoke?token=${tokenData.access_token}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        });
+        console.log('✅ Google access token revoked');
+      } catch (revokeError) {
+        console.log('⚠️ Token revocation failed (might already be invalid)');
+      }
+    }
+
+    // Delete tokens from database
+    const { error: deleteError } = await supabase
+      .from('google_auth_tokens')
+      .delete()
+      .eq('admin_id', adminId);
+
+    if (deleteError) throw deleteError;
+
+    console.log('✅ Google auth tokens removed from database');
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        success: true,
+        message: 'Google account disconnected successfully'
+      })
+    };
+
+  } catch (error) {
+    console.error('Error revoking Google access:', error);
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({
+        success: false,
+        error: 'Failed to disconnect Google account',
+        details: error.message
       })
     };
   }
