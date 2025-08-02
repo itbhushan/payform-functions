@@ -1,4 +1,4 @@
-// src/components/dashboard/MyForms.tsx - FIXED VERSION
+// src/components/dashboard/MyForms.tsx - UPDATED VERSION with Setup Guide and Logout
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
@@ -99,6 +99,53 @@ export const MyForms: React.FC = React.memo(() => {
     loadUserForms();
   }, [loadUserForms]);
 
+  // Google Logout Handler
+  const handleGoogleLogout = async () => {
+    const confirmed = window.confirm(
+      "⚠️ Are you sure you want to disconnect your Google account?\n\n" +
+      "This will:\n" +
+      "• Stop monitoring your forms for new responses\n" +
+      "• Stop sending payment emails to customers\n" +
+      "• Require re-authorization to resume payments\n\n" +
+      "Your existing transaction data will NOT be lost."
+    );
+    
+    if (!confirmed) return;
+    
+    try {
+      // Show loading state
+      setLoading(true);
+      
+      // Call logout API
+      const response = await fetch('/.netlify/functions/google-oauth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'revokeAccess',
+          adminId: user?.id || 'default'
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        // Show success message
+        alert('✅ Google account disconnected successfully!\n\nTo resume payments, click "Connect Google Account" again.');
+        
+        // Refresh the page to update connection status
+        window.location.reload();
+      } else {
+        throw new Error(result.error || 'Failed to disconnect Google account');
+      }
+      
+    } catch (error) {
+      console.error('Google logout error:', error);
+      alert('❌ Failed to disconnect Google account. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // ✅ FIX 1: Memoize forms count to prevent unnecessary re-renders in parent
   const formsCount = useMemo(() => forms.length, [forms.length]);
 
@@ -132,6 +179,20 @@ export const MyForms: React.FC = React.memo(() => {
               >
                 📖 Setup Guide
               </button>
+              
+              {/* Google Account Status with Logout */}
+              <div className="flex items-center px-3 py-2 bg-green-50 border border-green-200 rounded-lg">
+                <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
+                <span className="text-sm text-green-700">Google Connected</span>
+                <button
+                  onClick={handleGoogleLogout}
+                  className="ml-2 text-red-600 hover:text-red-800 text-sm font-medium"
+                  title="Disconnect Google Account"
+                >
+                  🚪 Logout
+                </button>
+              </div>
+              
               <button
                 onClick={() => setShowAddForm(true)}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
@@ -179,7 +240,7 @@ export const MyForms: React.FC = React.memo(() => {
         />
       )}
 
-      {/* Setup Guide Modal */}
+      {/* Enhanced Setup Guide Modal */}
       {showSetupGuide && (
         <SetupGuideModal onClose={() => setShowSetupGuide(false)} />
       )}
@@ -1081,30 +1142,238 @@ const FormDetailsModal: React.FC<{ form: FormConfig; onClose: () => void; onRefr
   </div>
 );
 
-// Setup Guide Modal (unchanged)
+// Enhanced Setup Guide Modal with Complete Guide Content
 const SetupGuideModal: React.FC<{ onClose: () => void }> = ({ onClose }) => (
-  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-    <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-      <div className="flex justify-between items-center mb-6">
-        <h3 className="text-lg font-medium text-gray-900">📖 Google Forms Integration Guide</h3>
-        <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+      {/* Header */}
+      <div className="flex justify-between items-center p-6 border-b border-gray-200">
+        <h3 className="text-xl font-semibold text-gray-900 flex items-center">
+          <span className="text-2xl mr-3">📚</span>
+          PayForm Complete Setup Guide
+        </h3>
+        <button
+          onClick={onClose}
+          className="text-gray-400 hover:text-gray-600 p-1"
+        >
           <span className="text-2xl">×</span>
         </button>
       </div>
 
-      <div className="prose prose-sm max-w-none">
-        <div className="text-center py-8">
-          <p className="text-gray-600">Complete step-by-step setup guide coming soon!</p>
-          <p className="text-sm text-gray-500 mt-2">
-            This will include screenshots, code snippets, and troubleshooting tips.
-          </p>
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-6">
+        <div className="prose prose-blue max-w-none">
+          
+          {/* Quick Start */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+            <h4 className="text-lg font-semibold text-blue-900 mb-2">🚀 Quick Start (10 minutes)</h4>
+            <p className="text-blue-800 text-sm">Turn your Google Forms into payment-enabled forms</p>
+            <div className="grid grid-cols-4 gap-2 mt-3 text-xs">
+              <div className="text-center">
+                <div className="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center mx-auto mb-1">1</div>
+                <span>Create Form</span>
+              </div>
+              <div className="text-center">
+                <div className="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center mx-auto mb-1">2</div>
+                <span>Connect PayForm</span>
+              </div>
+              <div className="text-center">
+                <div className="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center mx-auto mb-1">3</div>
+                <span>Setup Cashfree</span>
+              </div>
+              <div className="text-center">
+                <div className="w-8 h-8 bg-green-600 text-white rounded-full flex items-center justify-center mx-auto mb-1">✓</div>
+                <span>Go Live!</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Step 1: Create Google Form */}
+          <div className="mb-8">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+              <span className="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm mr-3">1</span>
+              Create Your Google Form (3 minutes)
+            </h3>
+            
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+              <h4 className="font-semibold text-red-900 mb-2">⚠️ Required Fields (Must Include)</h4>
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center">
+                  <span className="w-4 h-4 bg-red-600 text-white rounded-full flex items-center justify-center text-xs mr-2">!</span>
+                  <strong>Email Address</strong> - Short answer, Required
+                </div>
+                <div className="flex items-center">
+                  <span className="w-4 h-4 bg-red-600 text-white rounded-full flex items-center justify-center text-xs mr-2">!</span>
+                  <strong>Product Selection</strong> - Format: "Product Name - ₹Price"
+                </div>
+                <div className="flex items-center">
+                  <span className="w-4 h-4 bg-red-600 text-white rounded-full flex items-center justify-center text-xs mr-2">!</span>
+                  <strong>Name</strong> - Short answer, Required
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+              <h4 className="font-semibold text-gray-900 mb-2">✅ Example Form Structure</h4>
+              <div className="bg-white border rounded p-3 text-sm font-mono">
+                <div className="text-blue-600 font-bold mb-2">📋 Course Registration Form</div>
+                <div className="space-y-1 text-gray-700">
+                  <div>📧 Email Address *</div>
+                  <div>👤 Full Name *</div>
+                  <div>🛒 Select Course *</div>
+                  <div className="ml-4 text-gray-600">○ Digital Marketing Course - ₹999</div>
+                  <div className="ml-4 text-gray-600">○ Web Development Course - ₹1499</div>
+                  <div className="ml-4 text-gray-600">○ Data Science Course - ₹1999</div>
+                  <div>📱 Phone Number</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Step 2: Connect to PayForm */}
+          <div className="mb-8">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+              <span className="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm mr-3">2</span>
+              Connect to PayForm (2 minutes)
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h4 className="font-semibold text-blue-900 mb-2">A. Register Your Form</h4>
+                <ol className="text-sm space-y-1 text-blue-800">
+                  <li>1. Click "+ Connect New Form"</li>
+                  <li>2. Enter Form Name & URL</li>
+                  <li>3. Extract Form ID from URL</li>
+                </ol>
+              </div>
+              
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <h4 className="font-semibold text-green-900 mb-2">B. Authorize Google</h4>
+                <ol className="text-sm space-y-1 text-green-800">
+                  <li>1. Click "Connect Google Account"</li>
+                  <li>2. Select your Google account</li>
+                  <li>3. Allow all permissions</li>
+                </ol>
+              </div>
+            </div>
+          </div>
+
+          {/* Step 3: Setup Cashfree */}
+          <div className="mb-8">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+              <span className="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm mr-3">3</span>
+              Setup Cashfree Payment (4 minutes)
+            </h3>
+            
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+              <h4 className="font-semibold text-yellow-900 mb-2">💳 Required Information</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                <div>
+                  <strong className="text-yellow-900">Bank Details:</strong>
+                  <ul className="mt-1 space-y-1 text-yellow-800">
+                    <li>• Account Number</li>
+                    <li>• IFSC Code (e.g., HDFC0000123)</li>
+                    <li>• Account Holder Name</li>
+                  </ul>
+                </div>
+                <div>
+                  <strong className="text-yellow-900">Business Info:</strong>
+                  <ul className="mt-1 space-y-1 text-yellow-800">
+                    <li>• Business Type</li>
+                    <li>• PAN Number (ABCDE1234F)</li>
+                    <li>• GST Number (optional)</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <h4 className="font-semibold text-green-900 mb-2">⏱️ Approval Process</h4>
+              <p className="text-sm text-green-800">Submit → Wait 24-48 hours → Email confirmation → Start accepting payments!</p>
+            </div>
+          </div>
+
+          {/* Fee Structure */}
+          <div className="mb-8">
+            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+              <h4 className="font-semibold text-purple-900 mb-3">💰 Fee Structure (Transparent Pricing)</h4>
+              <div className="text-sm text-purple-800">
+                <p className="mb-2"><strong>Example for ₹1000 transaction:</strong></p>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="bg-white rounded p-2 text-center">
+                    <div className="font-semibold">Cashfree Fee</div>
+                    <div className="text-purple-600">₹28 (2.5% + ₹3)</div>
+                  </div>
+                  <div className="bg-white rounded p-2 text-center">
+                    <div className="font-semibold">PayForm Fee</div>
+                    <div className="text-purple-600">₹30 (3%)</div>
+                  </div>
+                  <div className="bg-white rounded p-2 text-center">
+                    <div className="font-semibold">You Receive</div>
+                    <div className="text-green-600 font-bold">₹942</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Troubleshooting */}
+          <div className="mb-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">🔧 Common Issues & Solutions</h3>
+            
+            <div className="space-y-3">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <div className="flex items-start">
+                  <span className="text-red-600 mr-2">❌</span>
+                  <div>
+                    <strong className="text-red-900">"No Google authentication"</strong>
+                    <p className="text-sm text-red-800 mt-1">Fix: Go to My Forms → Click "Connect Google Account"</p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <div className="flex items-start">
+                  <span className="text-red-600 mr-2">❌</span>
+                  <div>
+                    <strong className="text-red-900">"Payment emails not sending"</strong>
+                    <p className="text-sm text-red-800 mt-1">Fix: Verify Gmail permission granted during setup</p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <div className="flex items-start">
+                  <span className="text-red-600 mr-2">❌</span>
+                  <div>
+                    <strong className="text-red-900">"Cashfree not approved"</strong>
+                    <p className="text-sm text-red-800 mt-1">Fix: Check PAN format (ABCDE1234F) → Wait 24-48 hours</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="border-t border-gray-200 p-6 bg-gray-50">
+        <div className="flex justify-between items-center">
+          <div className="text-sm text-gray-600">
+            📞 Need help? Email: <strong>support@payform.com</strong>
+          </div>
+          <button
+            onClick={onClose}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium"
+          >
+            Got it! Let's Start
+          </button>
         </div>
       </div>
     </div>
   </div>
 );
-
-// ADD this new component at the end of MyForms.tsx, before the final export:
 
 // Google Authentication Component
 const GoogleAuthButton: React.FC<{ adminId: string; onAuthSuccess: () => void }> = ({ adminId, onAuthSuccess }) => {
