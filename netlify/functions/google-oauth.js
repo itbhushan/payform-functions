@@ -122,7 +122,6 @@ const exchangeCodeForTokens = async (code, adminId) => {
 
     // Get user info during token exchange
     let userEmail = null;
-    let userName = null;
     try {
       console.log('🔍 Fetching user info during OAuth...');
       const userInfoResponse = await fetch(`https://www.googleapis.com/oauth2/v2/userinfo?access_token=${tokens.access_token}`);
@@ -130,8 +129,7 @@ const exchangeCodeForTokens = async (code, adminId) => {
       if (userInfoResponse.ok) {
         const userInfo = await userInfoResponse.json();
         userEmail = userInfo.email;
-        userName = userInfo.name;
-        console.log('✅ Got user info during OAuth:', { email: userEmail, name: userName });
+        console.log('✅ Got user info during OAuth:', { email: userEmail });
       } else {
         console.log('⚠️ Could not fetch user info, status:', userInfoResponse.status);
       }
@@ -149,7 +147,6 @@ const exchangeCodeForTokens = async (code, adminId) => {
         token_expires_at: new Date(tokens.expiry_date).toISOString(),
         scope: tokens.scope,
         user_email: userEmail,
-        user_name: userName,
         updated_at: new Date().toISOString()
       });
 
@@ -167,7 +164,6 @@ const exchangeCodeForTokens = async (code, adminId) => {
         success: true,
         message: 'Google account connected successfully',
         email: userEmail,
-        name: userName,
         expiresAt: tokens.expiry_date
       })
     };
@@ -421,14 +417,13 @@ const getUserInfo = async (adminId) => {
     // Get stored tokens and user info
     const { data: tokenData, error: fetchError } = await supabase
       .from('google_auth_tokens')
-      .select('access_token, user_email, user_name')
+      .select('access_token, user_email')
       .eq('admin_id', adminId)
       .single();
 
     console.log('🔍 Token data:', { 
       hasToken: !!tokenData?.access_token, 
       userEmail: tokenData?.user_email,
-      userName: tokenData?.user_name,
       error: fetchError?.message 
     });
 
@@ -452,8 +447,7 @@ const getUserInfo = async (adminId) => {
         headers,
         body: JSON.stringify({
           success: true,
-          email: tokenData.user_email,
-          name: tokenData.user_name
+          email: tokenData.user_email
         })
       };
     }
@@ -473,8 +467,7 @@ const getUserInfo = async (adminId) => {
           await supabase
             .from('google_auth_tokens')
             .update({ 
-              user_email: userInfo.email,
-              user_name: userInfo.name 
+              user_email: userInfo.email
             })
             .eq('admin_id', adminId);
           
@@ -483,8 +476,7 @@ const getUserInfo = async (adminId) => {
             headers,
             body: JSON.stringify({
               success: true,
-              email: userInfo.email,
-              name: userInfo.name
+              email: userInfo.email
             })
           };
         } else {
