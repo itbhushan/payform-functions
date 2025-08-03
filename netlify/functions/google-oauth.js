@@ -16,17 +16,18 @@ const headers = {
   'Content-Type': 'application/json'
 };
 
+// Main handler
 exports.handler = async (event, context) => {
-  console.log('🔐 Google OAuth handler called');
-
   // Handle CORS preflight
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers, body: '' };
   }
 
   try {
-    const { action, code, adminId } = JSON.parse(event.body || '{}');
+    console.log('🔐 Google OAuth handler called');
     
+    const { action, adminId, code } = JSON.parse(event.body || '{}');
+
     switch (action) {
       case 'getAuthUrl':
         return await generateAuthUrl(adminId);
@@ -37,9 +38,9 @@ exports.handler = async (event, context) => {
       case 'checkAuth':
         return await checkAuthStatus(adminId);
       case 'revokeAccess':
-        return await revokeGoogleAccess(adminId);  // 🆕 ADD this line
-      case 'getUserInfo':                              // 🆕 ADD this line
-        return await getUserInfo(adminId);            // 🆕 ADD this line
+        return await revokeGoogleAccess(adminId);
+      case 'getUserInfo':
+        return await getUserInfo(adminId);
       default:
         return {
           statusCode: 400,
@@ -47,16 +48,13 @@ exports.handler = async (event, context) => {
           body: JSON.stringify({ error: 'Invalid action' })
         };
     }
+
   } catch (error) {
-    console.error('❌ OAuth handler error:', error);
+    console.error('OAuth handler error:', error);
     return {
       statusCode: 500,
-      headers,  
-      body: JSON.stringify({
-        success: false,
-        error: 'OAuth authentication failed',
-        message: error.message
-      })
+      headers,
+      body: JSON.stringify({ error: 'Internal server error' })
     };
   }
 };
@@ -64,6 +62,8 @@ exports.handler = async (event, context) => {
 // Generate Google OAuth URL
 const generateAuthUrl = async (adminId) => {
   try {
+    console.log(`🔗 Generating auth URL for admin: ${adminId}`);
+
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
@@ -72,14 +72,16 @@ const generateAuthUrl = async (adminId) => {
 
     const authUrl = oauth2Client.generateAuthUrl({
       access_type: 'offline',
+      prompt: 'consent',
+      state: adminId,
       scope: [
         'https://www.googleapis.com/auth/forms.responses.readonly',
         'https://www.googleapis.com/auth/forms.body.readonly',
         'https://www.googleapis.com/auth/gmail.send'
       ],
-      prompt: 'consent',
-      state: adminId // Pass admin ID in state parameter
     });
+
+    console.log('✅ Auth URL generated successfully');
 
     return {
       statusCode: 200,
@@ -97,13 +99,12 @@ const generateAuthUrl = async (adminId) => {
       headers,
       body: JSON.stringify({
         success: false,
-        error: 'Failed to generate authentication URL'
+        error: 'Failed to generate auth URL'
       })
     };
   }
 };
 
-// Exchange authorization code for access tokens
 // Exchange authorization code for access tokens
 const exchangeCodeForTokens = async (code, adminId) => {
   try {
@@ -121,18 +122,24 @@ const exchangeCodeForTokens = async (code, adminId) => {
 
     // Get user info during token exchange
     let userEmail = null;
+    let userName = null;
     try {
-      const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo?access_token=' + tokens.access_token);
+      console.log('🔍 Fetching user info during OAuth...');
+      const userInfoResponse = await fetch(`https://www.googleapis.com/oauth2/v2/userinfo?access_token=${tokens.access_token}`);
+      
       if (userInfoResponse.ok) {
         const userInfo = await userInfoResponse.json();
         userEmail = userInfo.email;
-        console.log('✅ Got user email during OAuth:', userEmail);
+        userName = userInfo.name;
+        console.log('✅ Got user info during OAuth:', { email: userEmail, name: userName });
+      } else {
+        console.log('⚠️ Could not fetch user info, status:', userInfoResponse.status);
       }
     } catch (emailFetchError) {
       console.log('⚠️ Could not fetch user email during OAuth:', emailFetchError.message);
     }
 
-    // Store tokens in database
+    // Store tokens in database with user info
     const { error: insertError } = await supabase
       .from('google_auth_tokens')
       .upsert({
@@ -142,12 +149,16 @@ const exchangeCodeForTokens = async (code, adminId) => {
         token_expires_at: new Date(tokens.expiry_date).toISOString(),
         scope: tokens.scope,
         user_email: userEmail,
+        user_name: userName,
         updated_at: new Date().toISOString()
       });
 
-    if (insertError) throw insertError;
+    if (insertError) {
+      console.error('❌ Database error:', insertError);
+      throw insertError;
+    }
 
-    console.log('✅ Tokens stored in database');
+    console.log('✅ Tokens and user info stored in database');
 
     return {
       statusCode: 200,
@@ -155,6 +166,8 @@ const exchangeCodeForTokens = async (code, adminId) => {
       body: JSON.stringify({
         success: true,
         message: 'Google account connected successfully',
+        email: userEmail,
+        name: userName,
         expiresAt: tokens.expiry_date
       })
     };
@@ -173,12 +186,12 @@ const exchangeCodeForTokens = async (code, adminId) => {
   }
 };
 
-// Refresh expired access token
+// Refresh access token using refresh token
 const refreshAccessToken = async (adminId) => {
   try {
-    console.log(`🔄 Refreshing access token for admin: ${adminId}`);
+    console.log(`🔄 Refreshing token for admin: ${adminId}`);
 
-    // Get stored tokens
+    // Get refresh token from database
     const { data: tokenData, error: fetchError } = await supabase
       .from('google_auth_tokens')
       .select('refresh_token')
@@ -186,23 +199,32 @@ const refreshAccessToken = async (adminId) => {
       .single();
 
     if (fetchError || !tokenData?.refresh_token) {
-      throw new Error('No refresh token found');
+      console.log('❌ No refresh token found');
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          success: false,
+          error: 'No refresh token available'
+        })
+      };
     }
 
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET
+      process.env.GOOGLE_CLIENT_SECRET,
+      `${process.env.URL}/.netlify/functions/google-oauth-callback`
     );
 
     oauth2Client.setCredentials({
       refresh_token: tokenData.refresh_token
     });
 
-    // Refresh the access token
+    // Refresh the token
     const { credentials } = await oauth2Client.refreshAccessToken();
-    console.log('✅ Access token refreshed');
+    console.log('✅ Token refreshed successfully');
 
-    // Update stored tokens
+    // Update database with new token
     const { error: updateError } = await supabase
       .from('google_auth_tokens')
       .update({
@@ -214,67 +236,109 @@ const refreshAccessToken = async (adminId) => {
 
     if (updateError) throw updateError;
 
+    console.log('✅ New token stored in database');
+
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: true,
-        message: 'Access token refreshed successfully'
+        message: 'Token refreshed successfully',
+        expiresAt: credentials.expiry_date
       })
     };
 
-  } catch (error) {
-    console.error('Error refreshing access token:', error);
+  } catch (refreshError) {
+    console.error('Error refreshing token:', refreshError);
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({
         success: false,
-        error: 'Failed to refresh access token',
-        requiresReauth: true
+        error: 'Failed to refresh token',
+        details: refreshError.message
       })
     };
   }
 };
 
-// Check current authentication status
+// Check authentication status
 const checkAuthStatus = async (adminId) => {
   try {
-    const { data: tokenData } = await supabase
+    console.log(`🔐 Checking auth for admin: ${adminId}`);
+
+    const { data: tokenData, error: fetchError } = await supabase
       .from('google_auth_tokens')
-      .select('access_token, token_expires_at')
+      .select('access_token, token_expires_at, user_email')
       .eq('admin_id', adminId)
       .single();
 
-    if (!tokenData) {
+    if (fetchError || !tokenData) {
+      console.log('❌ No auth tokens found');
       return {
         statusCode: 200,
         headers,
         body: JSON.stringify({
           success: true,
           authenticated: false,
-          message: 'No Google authentication found'
+          message: 'No authentication found'
         })
       };
     }
 
-    const expiresAt = new Date(tokenData.token_expires_at);
+    console.log('✅ Found auth tokens for admin', adminId);
+
+    // Check if token is expired
     const now = new Date();
-    const isExpired = expiresAt <= now;
+    const expiresAt = new Date(tokenData.token_expires_at);
+
+    if (now >= expiresAt) {
+      console.log('⚠️ Token expired, attempting refresh...');
+      const refreshResult = await refreshAccessToken(adminId);
+      const refreshData = JSON.parse(refreshResult.body);
+      
+      if (refreshData.success) {
+        console.log('✅ Token refreshed successfully');
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({
+            success: true,
+            authenticated: true,
+            email: tokenData.user_email,
+            message: 'Authenticated (token refreshed)'
+          })
+        };
+      } else {
+        console.log('❌ Token refresh failed');
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({
+            success: true,
+            authenticated: false,
+            message: 'Token expired and refresh failed'
+          })
+        };
+      }
+    }
+
+    console.log('🕐 Token expires at:', expiresAt.toISOString());
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: true,
-        authenticated: !isExpired,
-        expiresAt: tokenData.token_expires_at,
-        needsRefresh: isExpired
+        authenticated: true,
+        email: tokenData.user_email,
+        expiresAt: expiresAt.toISOString(),
+        message: 'Authenticated'
       })
     };
 
-  } catch (error) {
-    console.error('Error checking auth status:', error);
+  } catch (authError) {
+    console.error('Error checking auth status:', authError);
     return {
       statusCode: 500,
       headers,
@@ -285,7 +349,8 @@ const checkAuthStatus = async (adminId) => {
     };
   }
 };
-// Add this function at the end of google-oauth.js file
+
+// Revoke Google access tokens
 const revokeGoogleAccess = async (adminId) => {
   try {
     console.log(`🚪 Revoking Google access for admin: ${adminId}`);
@@ -297,16 +362,18 @@ const revokeGoogleAccess = async (adminId) => {
       .eq('admin_id', adminId)
       .single();
 
+    console.log('🔍 Token data found:', !!tokenData);
+
     if (tokenData?.access_token) {
       // Revoke the access token with Google
       try {
-        await fetch(`https://oauth2.googleapis.com/revoke?token=${tokenData.access_token}`, {
+        const revokeResponse = await fetch(`https://oauth2.googleapis.com/revoke?token=${tokenData.access_token}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
         });
-        console.log('✅ Google access token revoked');
+        console.log('🔍 Google token revocation status:', revokeResponse.status);
       } catch (revokeError) {
-        console.log('⚠️ Token revocation failed (might already be invalid)');
+        console.log('⚠️ Token revocation failed (might already be invalid):', revokeError);
       }
     }
 
@@ -316,7 +383,10 @@ const revokeGoogleAccess = async (adminId) => {
       .delete()
       .eq('admin_id', adminId);
 
-    if (deleteError) throw deleteError;
+    if (deleteError) {
+      console.error('❌ Database deletion error:', deleteError);
+      throw deleteError;
+    }
 
     console.log('✅ Google auth tokens removed from database');
 
@@ -330,7 +400,7 @@ const revokeGoogleAccess = async (adminId) => {
     };
 
   } catch (error) {
-    console.error('Error revoking Google access:', error);
+    console.error('❌ Error revoking Google access:', error);
     return {
       statusCode: 500,
       headers,
@@ -342,21 +412,23 @@ const revokeGoogleAccess = async (adminId) => {
     };
   }
 };
-// Add this function at the very end of google-oauth.js file
+
+// Get user info from stored data or Google API
 const getUserInfo = async (adminId) => {
   try {
     console.log(`🔍 Getting user info for admin: ${adminId}`);
 
-    // Get stored tokens and any existing user info
+    // Get stored tokens and user info
     const { data: tokenData, error: fetchError } = await supabase
       .from('google_auth_tokens')
-      .select('access_token, user_email, scope')
+      .select('access_token, user_email, user_name')
       .eq('admin_id', adminId)
       .single();
 
     console.log('🔍 Token data:', { 
       hasToken: !!tokenData?.access_token, 
       userEmail: tokenData?.user_email,
+      userName: tokenData?.user_name,
       error: fetchError?.message 
     });
 
@@ -380,17 +452,18 @@ const getUserInfo = async (adminId) => {
         headers,
         body: JSON.stringify({
           success: true,
-          email: tokenData.user_email
+          email: tokenData.user_email,
+          name: tokenData.user_name
         })
       };
     }
 
-    // Fallback: Try Google API call with simplified error handling
+    // Fallback: Try Google API call if no stored email
     if (tokenData.access_token) {
       try {
         console.log('🔄 Trying Google API fallback...');
         
-        const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo?access_token=' + tokenData.access_token);
+        const userInfoResponse = await fetch(`https://www.googleapis.com/oauth2/v2/userinfo?access_token=${tokenData.access_token}`);
         
         if (userInfoResponse.ok) {
           const userInfo = await userInfoResponse.json();
@@ -399,7 +472,10 @@ const getUserInfo = async (adminId) => {
           // Store the email for future use
           await supabase
             .from('google_auth_tokens')
-            .update({ user_email: userInfo.email })
+            .update({ 
+              user_email: userInfo.email,
+              user_name: userInfo.name 
+            })
             .eq('admin_id', adminId);
           
           return {
@@ -426,7 +502,7 @@ const getUserInfo = async (adminId) => {
       headers,
       body: JSON.stringify({
         success: true,
-        email: null // This will trigger "Connected Account" fallback
+        email: null
       })
     };
 
