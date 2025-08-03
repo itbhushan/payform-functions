@@ -104,6 +104,7 @@ const generateAuthUrl = async (adminId) => {
 };
 
 // Exchange authorization code for access tokens
+// Exchange authorization code for access tokens
 const exchangeCodeForTokens = async (code, adminId) => {
   try {
     console.log(`🔄 Exchanging code for tokens for admin: ${adminId}`);
@@ -118,8 +119,21 @@ const exchangeCodeForTokens = async (code, adminId) => {
     const { tokens } = await oauth2Client.getToken(code);
     console.log('✅ Tokens received from Google');
 
+    // Get user info during token exchange
+    let userEmail = null;
+    try {
+      const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo?access_token=' + tokens.access_token);
+      if (userInfoResponse.ok) {
+        const userInfo = await userInfoResponse.json();
+        userEmail = userInfo.email;
+        console.log('✅ Got user email during OAuth:', userEmail);
+      }
+    } catch (emailFetchError) {
+      console.log('⚠️ Could not fetch user email during OAuth:', emailFetchError.message);
+    }
+
     // Store tokens in database
-    const { error } = await supabase
+    const { error: insertError } = await supabase
       .from('google_auth_tokens')
       .upsert({
         admin_id: adminId,
@@ -127,37 +141,11 @@ const exchangeCodeForTokens = async (code, adminId) => {
         refresh_token: tokens.refresh_token,
         token_expires_at: new Date(tokens.expiry_date).toISOString(),
         scope: tokens.scope,
+        user_email: userEmail,
         updated_at: new Date().toISOString()
       });
 
-    // REPLACE with this enhanced version that also stores user email:
-// Get user info during token exchange
-let userEmail = null;
-try {
-  const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo?access_token=' + tokens.access_token);
-  if (userInfoResponse.ok) {
-    const userInfo = await userInfoResponse.json();
-    userEmail = userInfo.email;
-    console.log('✅ Got user email during OAuth:', userEmail);
-  }
-} catch (emailError) {
-  console.log('⚠️ Could not fetch user email during OAuth:', emailError.message);
-}
-
-// Store tokens with user email
-const { error } = await supabase
-  .from('google_auth_tokens')
-  .upsert({
-    admin_id: adminId,
-    access_token: tokens.access_token,
-    refresh_token: tokens.refresh_token,
-    token_expires_at: new Date(tokens.expiry_date).toISOString(),
-    scope: tokens.scope,
-    user_email: userEmail, // 🆕 Store the user's email
-    updated_at: new Date().toISOString()
-  });
-    
-    if (error) throw error;
+    if (insertError) throw insertError;
 
     console.log('✅ Tokens stored in database');
 
@@ -171,15 +159,15 @@ const { error } = await supabase
       })
     };
 
-  } catch (error) {
-    console.error('Error exchanging code for tokens:', error);
+  } catch (functionError) {
+    console.error('Error exchanging code for tokens:', functionError);
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({
         success: false,
         error: 'Failed to connect Google account',
-        details: error.message
+        details: functionError.message
       })
     };
   }
