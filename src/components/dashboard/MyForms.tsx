@@ -180,18 +180,14 @@ export const MyForms: React.FC = React.memo(() => {
                 📖 Setup Guide
               </button>
               
-              {/* Google Account Status with Logout */}
-              <div className="flex items-center px-3 py-2 bg-green-50 border border-green-200 rounded-lg">
-                <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
-                <span className="text-sm text-green-700">Google Connected</span>
-                <button
-                  onClick={handleGoogleLogout}
-                  className="ml-2 text-red-600 hover:text-red-800 text-sm font-medium"
-                  title="Disconnect Google Account"
-                >
-                  🚪 Logout
-                </button>
-              </div>
+              {/* Dynamic Google Account Status */}
+                  <GoogleConnectionStatus 
+                    adminId={user?.id || ''} 
+                    onLogoutSuccess={() => {
+                    // Force refresh after successful logout
+                    window.location.reload();
+                  }}
+                  />
               
               <button
                 onClick={() => setShowAddForm(true)}
@@ -1469,5 +1465,151 @@ const connectGoogleAccount = async () => {
         </>
       )}
     </button>
+  );
+};
+// Add this new component at the end of MyForms.tsx
+const GoogleConnectionStatus: React.FC<{ 
+  adminId: string; 
+  onLogoutSuccess: () => void;
+}> = ({ adminId, onLogoutSuccess }) => {
+  const [isConnected, setIsConnected] = useState<boolean | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  // Check connection status on mount and when adminId changes
+  useEffect(() => {
+    checkConnectionStatus();
+  }, [adminId]);
+
+  const checkConnectionStatus = async () => {
+    if (!adminId) return;
+    
+    try {
+      const response = await fetch('/.netlify/functions/google-oauth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'checkAuth', adminId })
+      });
+
+      const result = await response.json();
+      setIsConnected(result.success && result.authenticated);
+    } catch (error) {
+      console.error('Error checking Google connection:', error);
+      setIsConnected(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    const confirmed = window.confirm(
+      "⚠️ Are you sure you want to disconnect your Google account?\n\n" +
+      "This will:\n" +
+      "• Stop monitoring your forms for new responses\n" +
+      "• Stop sending payment emails to customers\n" +
+      "• Require re-authorization to resume payments\n\n" +
+      "Your existing transaction data will NOT be lost."
+    );
+    
+    if (!confirmed) return;
+    
+    try {
+      setLoading(true);
+      console.log('🚪 Starting Google logout process...');
+      
+      const response = await fetch('/.netlify/functions/google-oauth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'revokeAccess',
+          adminId: adminId
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log('✅ Google logout successful');
+        setIsConnected(false); // Update UI state immediately
+        
+        alert('✅ Google account disconnected successfully!\n\nTo resume payments, click "Connect Google Account" again.');
+        
+        // Call parent success handler
+        onLogoutSuccess();
+      } else {
+        throw new Error(result.error || 'Failed to disconnect Google account');
+      }
+      
+    } catch (error) {
+      console.error('❌ Google logout error:', error);
+      alert(`❌ Failed to disconnect Google account: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConnect = async () => {
+    try {
+      setLoading(true);
+      
+      const response = await fetch('/.netlify/functions/google-oauth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'getAuthUrl', adminId })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        window.location.href = result.authUrl;
+      } else {
+        throw new Error(result.error || 'Failed to get auth URL');
+      }
+    } catch (error) {
+      console.error('Error connecting Google account:', error);
+      alert('❌ Failed to connect Google account. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Loading state
+  if (isConnected === null) {
+    return (
+      <div className="flex items-center px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg">
+        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-gray-500 mr-2"></div>
+        <span className="text-sm text-gray-600">Checking connection...</span>
+      </div>
+    );
+  }
+
+  // Connected state
+  if (isConnected) {
+    return (
+      <div className="flex items-center px-3 py-2 bg-green-50 border border-green-200 rounded-lg">
+        <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
+        <span className="text-sm text-green-700">Google Connected</span>
+        <button
+          onClick={handleLogout}
+          disabled={loading}
+          className="ml-2 text-red-600 hover:text-red-800 text-sm font-medium disabled:opacity-50"
+          title="Disconnect Google Account"
+        >
+          {loading ? '⏳' : '🚪'} {loading ? 'Disconnecting...' : 'Logout'}
+        </button>
+      </div>
+    );
+  }
+
+  // Disconnected state
+  return (
+    <div className="flex items-center px-3 py-2 bg-red-50 border border-red-200 rounded-lg">
+      <div className="w-2 h-2 bg-red-500 rounded-full mr-2"></div>
+      <span className="text-sm text-red-700">Google Disconnected</span>
+      <button
+        onClick={handleConnect}
+        disabled={loading}
+        className="ml-2 text-blue-600 hover:text-blue-800 text-sm font-medium disabled:opacity-50"
+      >
+        {loading ? '⏳' : '🔗'} {loading ? 'Connecting...' : 'Connect'}
+      </button>
+    </div>
   );
 };
