@@ -41,6 +41,8 @@ exports.handler = async (event, context) => {
         return await revokeGoogleAccess(adminId);
       case 'getUserInfo':
         return await getUserInfo(adminId);
+      case 'forceUpdateEmail':
+        return await forceUpdateUserEmail(adminId);
       default:
         return {
           statusCode: 400,
@@ -58,6 +60,119 @@ exports.handler = async (event, context) => {
     };
   }
 };
+
+// Force update user email for existing tokens
+const forceUpdateUserEmail = async (adminId) => {
+  try {
+    console.log(`🔄 Force updating user email for admin: ${adminId}`);
+
+    // Get current token
+    const { data: tokenData, error: fetchError } = await supabase
+      .from('google_auth_tokens')
+      .select('access_token, refresh_token')
+      .eq('admin_id', adminId)
+      .single();
+
+    if (fetchError || !tokenData) {
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          success: false,
+          error: 'No tokens found'
+        })
+      };
+    }
+
+    // Try with current token first
+    let userEmail = null;
+    try {
+      const userInfoResponse = await fetch(`https://www.googleapis.com/oauth2/v2/userinfo?access_token=${tokenData.access_token}`);
+      
+      if (userInfoResponse.ok) {
+        const userInfo = await userInfoResponse.json();
+        userEmail = userInfo.email;
+        console.log('✅ Got email with current token:', userEmail);
+      } else if (userInfoResponse.status === 401 && tokenData.refresh_token) {
+        // Token expired, try refresh
+        console.log('🔄 Token expired, refreshing...');
+        
+        const oauth2Client = new google.auth.OAuth2(
+          process.env.GOOGLE_CLIENT_ID,
+          process.env.GOOGLE_CLIENT_SECRET,
+          `${process.env.URL}/.netlify/functions/google-oauth-callback`
+        );
+
+        oauth2Client.setCredentials({
+          refresh_token: tokenData.refresh_token
+        });
+
+        const { credentials } = await oauth2Client.refreshAccessToken();
+        
+        // Try again with new token
+        const retryResponse = await fetch(`https://www.googleapis.com/oauth2/v2/userinfo?access_token=${credentials.access_token}`);
+        
+        if (retryResponse.ok) {
+          const userInfo = await retryResponse.json();
+          userEmail = userInfo.email;
+          console.log('✅ Got email with refreshed token:', userEmail);
+          
+          // Update database with new token and email
+          await supabase
+            .from('google_auth_tokens')
+            .update({
+              access_token: credentials.access_token,
+              token_expires_at: new Date(credentials.expiry_date).toISOString(),
+              user_email: userEmail,
+              updated_at: new Date().toISOString()
+            })
+            .eq('admin_id', adminId);
+        }
+      }
+    } catch (apiError) {
+      console.error('❌ API error:', apiError);
+    }
+
+    if (userEmail) {
+      // Update just the email if we didn't update above
+      if (!tokenData.refresh_token) {
+        await supabase
+          .from('google_auth_tokens')
+          .update({ user_email: userEmail })
+          .eq('admin_id', adminId);
+      }
+
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          success: true,
+          email: userEmail,
+          message: 'Email updated successfully'
+        })
+      };
+    } else {
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          success: false,
+          error: 'Could not fetch email'
+        })
+      };
+    }
+
+  } catch (error) {
+    console.error('❌ Error force updating email:', error);
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({
+        success: false,
+        error: 'Failed to update email'
+      })
+    };
+  }
 
 // Generate Google OAuth URL
 const generateAuthUrl = async (adminId) => {
@@ -77,7 +192,9 @@ const generateAuthUrl = async (adminId) => {
       scope: [
         'https://www.googleapis.com/auth/forms.responses.readonly',
         'https://www.googleapis.com/auth/forms.body.readonly',
-        'https://www.googleapis.com/auth/gmail.send'
+        'https://www.googleapis.com/auth/gmail.send',
+        'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/userinfo.profile'
       ],
     });
 
