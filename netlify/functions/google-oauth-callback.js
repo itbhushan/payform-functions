@@ -48,13 +48,31 @@ exports.handler = async (event, context) => {
     // Exchange authorization code for tokens
     const { tokens } = await oauth2Client.getToken(code);
     console.log('✅ Tokens received from Google');
+    console.log('🔍 Token details:', { 
+      hasAccessToken: !!tokens.access_token, 
+      hasRefreshToken: !!tokens.refresh_token,
+      expiryDate: tokens.expiry_date 
+    });
     
-    // Get user info BEFORE storing tokens
-    oauth2Client.setCredentials(tokens);
-    const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
-    const userInfo = await oauth2.userinfo.get();
-    
-    console.log(`✅ Google account info retrieved: ${userInfo.data.email}`);
+    // Get user info using direct API call
+    let userEmail = null;
+    try {
+      console.log('🔍 Fetching user info with access token...');
+      const userInfoResponse = await fetch(`https://www.googleapis.com/oauth2/v2/userinfo?access_token=${tokens.access_token}`);
+      
+      if (userInfoResponse.ok) {
+        const userData = await userInfoResponse.json();
+        userEmail = userData.email;
+        console.log(`✅ Google account info retrieved: ${userEmail}`);
+      } else {
+        const errorText = await userInfoResponse.text();
+        console.error('❌ Failed to fetch user info:', userInfoResponse.status, errorText);
+        throw new Error(`User info API failed: ${userInfoResponse.status}`);
+      }
+    } catch (userInfoError) {
+      console.error('❌ Error fetching user info:', userInfoError);
+      throw userInfoError;
+    }
     
     // Store tokens AND user email in database
     const { error: dbError } = await supabase
@@ -65,25 +83,25 @@ exports.handler = async (event, context) => {
         refresh_token: tokens.refresh_token,
         token_expires_at: new Date(tokens.expiry_date).toISOString(),
         scope: tokens.scope,
-        user_email: userInfo.data.email,  // 🆕 STORE USER EMAIL
+        user_email: userEmail,  // 🆕 STORE USER EMAIL
         updated_at: new Date().toISOString()
       }, {
         onConflict: 'admin_id'
       });
         
     if (dbError) {
-      console.error('Database error:', dbError);
+      console.error('❌ Database error:', dbError);
       throw dbError;
     }
     
     console.log('✅ Tokens and user email stored in database successfully');
-    console.log(`📧 Stored email: ${userInfo.data.email} for admin: ${adminId}`);
+    console.log(`📧 Stored email: ${userEmail} for admin: ${adminId}`);
     
     // Redirect back to PayForm with success
     return {
       statusCode: 302,
       headers: {
-        Location: `${process.env.URL}/?auth=success&email=${encodeURIComponent(userInfo.data.email)}`
+        Location: `${process.env.URL}/?auth=success&email=${encodeURIComponent(userEmail)}`
       }
     };
     
