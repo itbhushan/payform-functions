@@ -102,29 +102,6 @@ exports.handler = async (event, context) => {
       console.log('⚠️ User info fetch failed, continuing without email:', userInfoError.message);
     }
     
-    // Store tokens AND user email in database
-    const { error: dbError } = await supabase
-      .from('google_auth_tokens')
-      .upsert({
-        admin_id: adminId,
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token,
-        token_expires_at: new Date(tokens.expiry_date).toISOString(),
-        scope: tokens.scope,
-        user_email: userEmail,  // 🆕 STORE USER EMAIL
-        updated_at: new Date().toISOString()
-      }, {
-        onConflict: 'admin_id'
-      });
-        
-    if (dbError) {
-      console.error('❌ Database error:', dbError);
-      throw dbError;
-    }
-    
-    console.log('✅ Tokens and user email stored in database successfully');
-    console.log(`📧 Stored email: ${userEmail} for admin: ${adminId}`);
-    
     // Redirect back to PayForm with success
     return {
       statusCode: 302,
