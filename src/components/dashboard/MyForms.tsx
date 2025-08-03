@@ -1473,6 +1473,7 @@ const GoogleConnectionStatus: React.FC<{
   onLogoutSuccess: () => void;
 }> = ({ adminId, onLogoutSuccess }) => {
   const [isConnected, setIsConnected] = useState<boolean | null>(null);
+  const [googleEmail, setGoogleEmail] = useState<string>(''); // 🆕 Add Google email state
   const [loading, setLoading] = useState(false);
 
   // Check connection status on mount and when adminId changes
@@ -1491,10 +1492,40 @@ const GoogleConnectionStatus: React.FC<{
       });
 
       const result = await response.json();
-      setIsConnected(result.success && result.authenticated);
+      const connected = result.success && result.authenticated;
+      setIsConnected(connected);
+      
+      // 🆕 Fetch Google account email if connected
+      if (connected) {
+        await fetchGoogleAccountInfo();
+      } else {
+        setGoogleEmail(''); // Clear email if not connected
+      }
     } catch (error) {
       console.error('Error checking Google connection:', error);
       setIsConnected(false);
+      setGoogleEmail('');
+    }
+  };
+
+  // 🆕 New function to fetch Google account details
+  const fetchGoogleAccountInfo = async () => {
+    try {
+      const response = await fetch('/.netlify/functions/google-oauth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'getUserInfo', adminId })
+      });
+
+      const result = await response.json();
+      if (result.success && result.email) {
+        setGoogleEmail(result.email);
+      } else {
+        setGoogleEmail('Connected Account'); // Fallback text
+      }
+    } catch (error) {
+      console.error('Error fetching Google account info:', error);
+      setGoogleEmail('Connected Account'); // Fallback text
     }
   };
 
@@ -1528,6 +1559,7 @@ const GoogleConnectionStatus: React.FC<{
       if (result.success) {
         console.log('✅ Google logout successful');
         setIsConnected(false); // Update UI state immediately
+        setGoogleEmail(''); // Clear email
         
         alert('✅ Google account disconnected successfully!\n\nTo resume payments, click "Connect Google Account" again.');
         
@@ -1580,17 +1612,24 @@ const GoogleConnectionStatus: React.FC<{
     );
   }
 
-  // Connected state
+  // 🆕 Enhanced Connected state with Google account display
   if (isConnected) {
     return (
       <div className="flex items-center px-3 py-2 bg-green-50 border border-green-200 rounded-lg">
-        <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
-        <span className="text-sm text-green-700">Google Connected</span>
+        <div className="w-2 h-2 bg-green-500 rounded-full mr-2 flex-shrink-0"></div>
+        <div className="flex flex-col min-w-0 flex-1">
+          <span className="text-sm text-green-700 font-medium">Google Connected</span>
+          {googleEmail && (
+            <span className="text-xs text-green-600 truncate" title={googleEmail}>
+              {googleEmail}
+            </span>
+          )}
+        </div>
         <button
           onClick={handleLogout}
           disabled={loading}
-          className="ml-2 text-red-600 hover:text-red-800 text-sm font-medium disabled:opacity-50"
-          title="Disconnect Google Account"
+          className="ml-3 text-red-600 hover:text-red-800 text-sm font-medium disabled:opacity-50 flex-shrink-0"
+          title={`Disconnect Google Account${googleEmail ? ` (${googleEmail})` : ''}`}
         >
           {loading ? '⏳' : '🚪'} {loading ? 'Disconnecting...' : 'Logout'}
         </button>
