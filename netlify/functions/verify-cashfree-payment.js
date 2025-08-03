@@ -142,12 +142,15 @@ let { data: updatedData, error: updateError } = await supabase
         }
       }
 
-      return {
-        statusCode: 200,
-        headers,
-        body: generateSuccessPage(orderData, email)
-      };
+// Send confirmation email to customer
+await sendCustomerConfirmationEmail(orderData, email, form_id);
 
+return {
+  statusCode: 200,
+  headers,
+  body: generateSuccessPage(orderData, email)
+};
+      
     } else {
       console.log('⏳ Payment not completed:', orderData.order_status);
       return {
@@ -165,6 +168,133 @@ let { data: updatedData, error: updateError } = await supabase
       body: generateErrorPage('Payment verification failed: ' + error.message)
     };
   }
+};
+
+// Send customer confirmation email
+const sendCustomerConfirmationEmail = async (orderData, email, formId) => {
+  try {
+    console.log(`📧 Sending confirmation email to ${email}`);
+
+    // Get form and admin info for personalized email
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    
+    const { data: formData, error: formError } = await supabase
+      .from('form_configs')
+      .select(`
+        form_name,
+        admin_id,
+        form_admins (
+          name,
+          email
+        )
+      `)
+      .eq('form_id', formId)
+      .single();
+
+    if (formError || !formData) {
+      console.log('⚠️ Could not get form info, sending basic confirmation');
+    }
+
+    const adminInfo = formData?.form_admins?.[0] || { name: 'PayForm Team' };
+    const formName = formData?.form_name || 'Your Form';
+    const adminId = formData?.admin_id;
+
+    // Generate confirmation email template
+    const emailHtml = generateConfirmationEmailTemplate(orderData, email, formName, adminInfo);
+
+    // Send email using same system as payment links
+    const emailResponse = await fetch(`${process.env.SUPABASE_URL}/functions/v1/send-payment-email`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+      },
+      body: JSON.stringify({
+        to: email,
+        subject: `Payment Confirmation - ${orderData.cf_order_id}`,
+        html: emailHtml,
+        productName: 'Payment Confirmation',
+        amount: orderData.order_amount,
+        customerName: orderData.customer_details?.customer_name || 'Customer',
+        formName: formName,
+        adminId: adminId || 'default'
+      })
+    });
+
+    const emailResult = await emailResponse.json();
+    
+    if (emailResult.success) {
+      console.log(`✅ Confirmation email sent to ${email}`);
+      return true;
+    } else {
+      console.error(`❌ Failed to send confirmation email:`, emailResult.error);
+      return false;
+    }
+
+  } catch (error) {
+    console.error('❌ Error sending confirmation email:', error);
+    return false;
+  }
+};
+
+// Generate customer confirmation email template
+const generateConfirmationEmailTemplate = (orderData, email, formName, adminInfo) => {
+  const amount = orderData.order_amount;
+  const orderId = orderData.cf_order_id;
+  const customerName = orderData.customer_details?.customer_name || 'Customer';
+  
+  return `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h1 style="color: #10b981; margin-bottom: 10px;">🎉 Payment Successful!</h1>
+        <p style="color: #666; font-size: 18px;">Thank you for your payment</p>
+      </div>
+      
+      <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h3 style="margin: 0 0 15px 0; color: #065f46;">Payment Details:</h3>
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; border-bottom: 1px solid #d1fae5;"><strong>Order ID:</strong></td>
+            <td style="padding: 8px 0; border-bottom: 1px solid #d1fae5; text-align: right;">${orderId}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; border-bottom: 1px solid #d1fae5;"><strong>Amount:</strong></td>
+            <td style="padding: 8px 0; border-bottom: 1px solid #d1fae5; text-align: right; color: #10b981; font-weight: bold;">₹${amount}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; border-bottom: 1px solid #d1fae5;"><strong>Customer:</strong></td>
+            <td style="padding: 8px 0; border-bottom: 1px solid #d1fae5; text-align: right;">${customerName}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; border-bottom: 1px solid #d1fae5;"><strong>Email:</strong></td>
+            <td style="padding: 8px 0; border-bottom: 1px solid #d1fae5; text-align: right;">${email}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0;"><strong>Form:</strong></td>
+            <td style="padding: 8px 0; text-align: right;">${formName}</td>
+          </tr>
+        </table>
+      </div>
+      
+      <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 15px; margin: 20px 0;">
+        <p style="margin: 0; color: #1e40af; font-size: 14px;">
+          ✅ <strong>Your payment has been confirmed and processed successfully.</strong><br>
+          📧 Keep this email as your receipt for the transaction.
+        </p>
+      </div>
+      
+      <div style="text-align: center; margin: 30px 0;">
+        <p style="color: #666;">Need help? Reply to this email or contact support.</p>
+      </div>
+      
+      <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+      
+      <p style="font-size: 12px; color: #999; text-align: center;">
+        This confirmation email was sent by ${adminInfo?.name || 'PayForm Team'}<br>
+        Payment processed securely by Cashfree Payments
+      </p>
+    </div>
+  `;
 };
 
 function generateSuccessPage(orderData, email) {
@@ -228,7 +358,7 @@ function generateSuccessPage(orderData, email) {
             <p style="margin: 5px 0;"><strong>Status:</strong> ✅ Payment Confirmed</p>
           </div>
 
-          <p>You will receive a confirmation email shortly.</p>
+          <p>A confirmation email has been sent to your email address.</p>
                   
           <p style="color: #666; margin-top: 30px; font-size: 14px;">You can now close this window.</p>
         </div>
