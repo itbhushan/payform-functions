@@ -54,24 +54,52 @@ exports.handler = async (event, context) => {
       expiryDate: tokens.expiry_date 
     });
     
-    // Get user info using direct API call
-    let userEmail = null;
+    // Store tokens first (without user email for now)
+    const { error: dbError } = await supabase
+      .from('google_auth_tokens')
+      .upsert({
+        admin_id: adminId,
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        token_expires_at: new Date(tokens.expiry_date).toISOString(),
+        scope: tokens.scope,
+        user_email: null, // Will be populated later
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'admin_id'
+      });
+        
+    if (dbError) {
+      console.error('❌ Database error:', dbError);
+      throw dbError;
+    }
+    
+    console.log('✅ Tokens stored in database successfully');
+    console.log('📧 Email will be fetched on first use');
+    
+    // Try to get user info (but don't fail if it doesn't work)
+    let userEmail = 'Google Account';
     try {
-      console.log('🔍 Fetching user info with access token...');
+      console.log('🔍 Attempting to fetch user info...');
       const userInfoResponse = await fetch(`https://www.googleapis.com/oauth2/v2/userinfo?access_token=${tokens.access_token}`);
       
       if (userInfoResponse.ok) {
         const userData = await userInfoResponse.json();
         userEmail = userData.email;
-        console.log(`✅ Google account info retrieved: ${userEmail}`);
+        console.log(`✅ Got user email: ${userEmail}`);
+        
+        // Update the stored record with email
+        await supabase
+          .from('google_auth_tokens')
+          .update({ user_email: userEmail })
+          .eq('admin_id', adminId);
+        
+        console.log('✅ User email updated in database');
       } else {
-        const errorText = await userInfoResponse.text();
-        console.error('❌ Failed to fetch user info:', userInfoResponse.status, errorText);
-        throw new Error(`User info API failed: ${userInfoResponse.status}`);
+        console.log('⚠️ Could not fetch user info, will try later');
       }
     } catch (userInfoError) {
-      console.error('❌ Error fetching user info:', userInfoError);
-      throw userInfoError;
+      console.log('⚠️ User info fetch failed, continuing without email:', userInfoError.message);
     }
     
     // Store tokens AND user email in database
