@@ -173,6 +173,7 @@ const forceUpdateUserEmail = async (adminId) => {
       })
     };
   }
+}; // 🆕 ADD THIS MISSING CLOSING BRACE
 
 // Generate Google OAuth URL
 const generateAuthUrl = async (adminId) => {
