@@ -143,7 +143,13 @@ let { data: updatedData, error: updateError } = await supabase
       }
 
 // Send confirmation email to customer
-await sendCustomerConfirmationEmail(orderData, email, form_id);
+try {
+  await sendCustomerConfirmationEmail(orderData, email, form_id);
+  console.log('✅ Confirmation email process completed');
+} catch (emailError) {
+  console.error('❌ Confirmation email failed:', emailError);
+  console.log('⚠️ Payment verification continues normally despite email failure');
+}
 
 return {
   statusCode: 200,
