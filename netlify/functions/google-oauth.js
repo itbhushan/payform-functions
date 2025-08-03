@@ -38,6 +38,8 @@ exports.handler = async (event, context) => {
         return await checkAuthStatus(adminId);
       case 'revokeAccess':
         return await revokeGoogleAccess(adminId);  // 🆕 ADD this line
+      case 'getUserInfo':                              // 🆕 ADD this line
+        return await getUserInfo(adminId);            // 🆕 ADD this line
       default:
         return {
           statusCode: 400,
@@ -321,6 +323,63 @@ const revokeGoogleAccess = async (adminId) => {
         success: false,
         error: 'Failed to disconnect Google account',
         details: error.message
+      })
+    };
+  }
+};
+// Add this function at the very end of google-oauth.js file
+const getUserInfo = async (adminId) => {
+  try {
+    console.log(`🔍 Getting user info for admin: ${adminId}`);
+
+    const { data: tokenData, error: fetchError } = await supabase
+      .from('google_auth_tokens')
+      .select('access_token')
+      .eq('admin_id', adminId)
+      .single();
+
+    if (fetchError || !tokenData?.access_token) {
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          success: false,
+          error: 'No access token found'
+        })
+      };
+    }
+
+    const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: {
+        'Authorization': `Bearer ${tokenData.access_token}`
+      }
+    });
+
+    if (!userInfoResponse.ok) {
+      throw new Error('Failed to fetch user info from Google');
+    }
+
+    const userInfo = await userInfoResponse.json();
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        success: true,
+        email: userInfo.email,
+        name: userInfo.name,
+        picture: userInfo.picture
+      })
+    };
+
+  } catch (error) {
+    console.error('Error getting user info:', error);
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({
+        success: false,
+        error: 'Failed to get user info'
       })
     };
   }
