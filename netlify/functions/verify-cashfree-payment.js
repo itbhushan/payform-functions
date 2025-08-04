@@ -213,7 +213,7 @@ const sendCustomerConfirmationEmail = async (orderData, email, formId) => {
       },
       body: JSON.stringify({
         to: email,
-        subject: `✅ Payment Confirmed - Order #${orderData.cf_order_id}`,
+        subject: `Payment Confirmed - Order #${orderData.cf_order_id}`,
         customerName: orderData.customer_details?.customer_name || 'Customer',
         amount: orderData.order_amount,
         adminId: adminId || 'default',
