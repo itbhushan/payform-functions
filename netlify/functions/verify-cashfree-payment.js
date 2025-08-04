@@ -335,3 +335,130 @@ const generateConfirmationEmailTemplate = (orderData, email, formName, adminInfo
     </div>
   `;
 };
+// Add these helper functions to the END of your verify-cashfree-payment.js file
+
+// Helper function to generate success page
+function generateSuccessPage(orderData, email) {
+  const amount = orderData.order_amount;
+  const orderId = orderData.cf_order_id;
+  const customerName = orderData.customer_details?.customer_name || 'Customer';
+  
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Payment Successful - PayForm</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            margin: 0; padding: 20px; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            min-height: 100vh; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+          }
+          .container { 
+            background: white; 
+            padding: 40px; 
+            border-radius: 15px; 
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1); 
+            max-width: 500px; 
+            text-align: center; 
+          }
+          .success-icon { font-size: 64px; margin-bottom: 20px; }
+          .amount { 
+            background: #e8f5e8; 
+            padding: 20px; 
+            border-radius: 10px; 
+            margin: 20px 0; 
+            border-left: 4px solid #4caf50; 
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="success-icon">🎉</div>
+          <h1 style="color: #4caf50; margin-bottom: 10px;">Payment Successful!</h1>
+          <p>Thank you for your payment. Your transaction has been processed successfully.</p>
+          
+          <div class="amount">
+            <p style="margin: 5px 0;"><strong>Transaction ID:</strong> ${orderId}</p>
+            <p style="margin: 5px 0;"><strong>Amount:</strong> ₹${amount}</p>
+            <p style="margin: 5px 0;"><strong>Customer:</strong> ${customerName}</p>
+            <p style="margin: 5px 0;"><strong>Email:</strong> ${email}</p>
+            <p style="margin: 5px 0;"><strong>Status:</strong> ✅ Paid & Confirmed</p>
+          </div>
+
+          <p>A confirmation email has been sent to your email address.</p>
+          <p style="color: #666; margin-top: 30px; font-size: 14px;">You can now close this window.</p>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
+// Helper function to generate error page
+function generateErrorPage(message) {
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Payment Error - PayForm</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+      </head>
+      <body style="font-family: Arial, sans-serif; padding: 40px; text-align: center; background: #f8f9fa;">
+        <div style="background: white; padding: 30px; border-radius: 10px; max-width: 500px; margin: 0 auto; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+          <h2 style="color: #dc3545;">❌ Payment Error</h2>
+          <p>${message}</p>
+          <p>Please contact support if this issue persists.</p>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
+// Helper function to generate cancelled page
+function generateCancelledPage() {
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Payment Cancelled - PayForm</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+      </head>
+      <body style="font-family: Arial, sans-serif; padding: 40px; text-align: center; background: #f8f9fa;">
+        <div style="background: white; padding: 30px; border-radius: 10px; max-width: 500px; margin: 0 auto; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+          <h2 style="color: #ffc107;">⚠️ Payment Cancelled</h2>
+          <p>Your payment was cancelled. No charges were made.</p>
+          <p>You can try again or contact support if you need assistance.</p>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
+// Helper function to generate pending page
+function generatePendingPage(status) {
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Payment Pending - PayForm</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+      </head>
+      <body style="font-family: Arial, sans-serif; padding: 40px; text-align: center; background: #f8f9fa;">
+        <div style="background: white; padding: 30px; border-radius: 10px; max-width: 500px; margin: 0 auto; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+          <h2 style="color: #ffc107;">⏳ Payment Pending</h2>
+          <p>Your payment status: <strong>${status}</strong></p>
+          <p>Please wait while we process your payment or try again.</p>
+        </div>
+      </body>
+    </html>
+  `;
+}
