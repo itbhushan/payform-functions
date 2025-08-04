@@ -208,13 +208,22 @@ async function fetchDashboardStats(supabase, adminId) {
   }
 }
 
+// REPLACE the entire fetchRecentTransactions function with this updated version
+
 async function fetchRecentTransactions(supabase, adminId) {
   try {
     console.log('💳 Fetching transactions for admin:', adminId);
 
+    // Updated query to JOIN with form_configs to get form names
     const { data: transactions, error } = await supabase
       .from('transactions')
-      .select('*')
+      .select(`
+        *,
+        form_configs (
+          form_name,
+          form_url
+        )
+      `)
       .eq('admin_id', adminId)
       .order('created_at', { ascending: false })
       .limit(50);
@@ -236,6 +245,11 @@ async function fetchRecentTransactions(supabase, adminId) {
       email: t.email,
       customerName: t.customer_name || 'Unknown',
       productName: t.product_name || 'Unknown Product',
+      
+      // 🆕 NEW: Add form name from the joined form_configs table
+      formName: t.form_configs?.form_name || 'Unknown Form',
+      formUrl: t.form_configs?.form_url || null,
+      
       amount: parseFloat(t.payment_amount || 0).toFixed(2),
       commission: parseFloat(t.platform_commission || 0).toFixed(2),
       netAmount: parseFloat(t.net_amount_to_admin || 0).toFixed(2),
@@ -247,7 +261,10 @@ async function fetchRecentTransactions(supabase, adminId) {
       formattedTime: new Date(t.created_at).toLocaleTimeString('en-IN', { 
         hour: '2-digit', 
         minute: '2-digit' 
-      })
+      }),
+      
+      // 🆕 NEW: Add form ID for reference
+      formId: t.form_id
     }));
 
   } catch (error) {
