@@ -178,8 +178,7 @@ return {
 };
 
 // Send customer confirmation email
-// REPLACE the entire sendCustomerConfirmationEmail function with this corrected version
-
+// REPLACE the entire sendCustomerConfirmationEmail function with this version
 const sendCustomerConfirmationEmail = async (orderData, email, formId) => {
   try {
     console.log(`📧 Sending confirmation email to ${email}`);
@@ -208,58 +207,43 @@ const sendCustomerConfirmationEmail = async (orderData, email, formId) => {
     const formName = formData?.form_name || 'Your Form';
     const adminId = formData?.admin_id;
 
-    // Generate confirmation email template
-    const emailHtml = generateConfirmationEmailTemplate(orderData, email, formName, adminInfo);
+    // Generate CONFIRMATION email template (not payment request)
+    const confirmationEmailHtml = generateConfirmationEmailTemplate(orderData, email, formName, adminInfo);
 
-    // Send email directly using nodemailer with Gmail SMTP (same system as your payment links)
-    const nodemailer = require('nodemailer');
-    
-    // Get Gmail OAuth tokens for the form admin
-    const { data: tokenData } = await supabase
-      .from('google_auth_tokens')
-      .select('*')
-      .eq('admin_id', adminId)
-      .single();
-
-    if (!tokenData || !tokenData.access_token) {
-      console.error('❌ No Gmail tokens found for admin:', adminId);
-      return false;
-    }
-
-    // Create Gmail transporter
-    const transporter = nodemailer.createTransporter({
-      service: 'gmail',
-      auth: {
-        type: 'OAuth2',
-        user: tokenData.user_email || adminInfo.email,
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token,
-        clientId: process.env.GOOGLE_CLIENT_ID,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET
-      }
+    // Use the existing working email system but with confirmation content
+    const emailResponse = await fetch(`${process.env.SUPABASE_URL}/functions/v1/send-payment-email`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+      },
+      body: JSON.stringify({
+        // Override the template to send confirmation instead of payment request
+        to: email,
+        subject: `✅ Payment Confirmed - Order #${orderData.cf_order_id}`,
+        html: confirmationEmailHtml, // This is our confirmation template, not payment template
+        
+        // These fields ensure it's treated as a confirmation
+        isConfirmation: true,
+        orderData: orderData,
+        customerName: orderData.customer_details?.customer_name || 'Customer',
+        amount: orderData.order_amount,
+        formName: formName,
+        adminId: adminId || 'default'
+      })
     });
 
-    // Send confirmation email
-    await transporter.sendMail({
-      from: `"${adminInfo.name || 'PayForm'}" <${tokenData.user_email || adminInfo.email}>`,
-      to: email,
-      subject: `Payment Confirmation - Order #${orderData.cf_order_id}`,
-      html: emailHtml
-    });
-
-    console.log(`✅ Confirmation email sent to ${email}`);
-    return true;
-
-  } catch (error) {
-    console.error('❌ Error sending confirmation email:', error);
+    const emailResult = await emailResponse.json();
+    console.log('📧 Email API response:', emailResult);
     
-    // Fallback: Try using the existing Supabase function but with confirmation content
-    try {
-      console.log('🔄 Trying fallback email method...');
+    if (emailResult.success) {
+      console.log(`✅ Confirmation email sent to ${email}`);
+      return true;
+    } else {
+      console.error(`❌ Failed to send confirmation email:`, emailResult.error);
       
-      const fallbackHtml = generateSimpleConfirmationEmail(orderData, email);
-      
-      const emailResponse = await fetch(`${process.env.SUPABASE_URL}/functions/v1/send-confirmation-email`, {
+      // Try alternative approach - send simple text confirmation
+      const simpleEmailResponse = await fetch(`${process.env.SUPABASE_URL}/functions/v1/send-payment-email`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -267,63 +251,73 @@ const sendCustomerConfirmationEmail = async (orderData, email, formId) => {
         },
         body: JSON.stringify({
           to: email,
-          subject: `Payment Successful - Order #${orderData.cf_order_id}`,
-          html: fallbackHtml,
-          orderData: orderData
+          subject: `Payment Successful - ₹${orderData.order_amount}`,
+          html: generateSimpleConfirmationHtml(orderData, email),
+          adminId: adminId || 'default'
         })
       });
 
-      if (emailResponse.ok) {
-        console.log('✅ Fallback confirmation email sent');
+      const simpleResult = await simpleEmailResponse.json();
+      if (simpleResult.success) {
+        console.log(`✅ Simple confirmation email sent to ${email}`);
         return true;
       }
-    } catch (fallbackError) {
-      console.error('❌ Fallback email also failed:', fallbackError);
+      
+      return false;
     }
-    
+
+  } catch (error) {
+    console.error('❌ Error sending confirmation email:', error);
     return false;
   }
 };
 
-// Simple confirmation email template (fallback)
-const generateSimpleConfirmationEmail = (orderData, email) => {
+// Simple confirmation email HTML (fallback)
+const generateSimpleConfirmationHtml = (orderData, email) => {
   const amount = orderData.order_amount;
   const orderId = orderData.cf_order_id;
   const customerName = orderData.customer_details?.customer_name || 'Customer';
   
   return `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8">
-        <title>Payment Confirmation</title>
-      </head>
-      <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="text-align: center; margin-bottom: 30px;">
-          <h1 style="color: #10b981;">🎉 Payment Successful!</h1>
-          <p style="font-size: 18px;">Thank you, ${customerName}!</p>
-        </div>
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f9fafb;">
+      
+      <div style="text-align: center; background: white; padding: 30px; border-radius: 10px; margin-bottom: 20px;">
+        <h1 style="color: #10b981; font-size: 24px; margin: 0 0 10px 0;">🎉 Payment Successful!</h1>
+        <p style="color: #666; font-size: 16px; margin: 0;">Thank you for your payment, ${customerName}</p>
+      </div>
+      
+      <div style="background: white; border-radius: 10px; padding: 25px; margin-bottom: 20px;">
+        <h3 style="color: #065f46; margin: 0 0 15px 0; border-bottom: 2px solid #10b981; padding-bottom: 8px;">📋 Payment Receipt</h3>
         
-        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 20px;">
-          <h3 style="color: #065f46; margin-top: 0;">Payment Details:</h3>
-          <p><strong>Transaction ID:</strong> ${orderId}</p>
-          <p><strong>Amount Paid:</strong> ₹${amount}</p>
-          <p><strong>Email:</strong> ${email}</p>
-          <p><strong>Status:</strong> ✅ CONFIRMED</p>
-        </div>
-        
-        <div style="margin-top: 20px; padding: 15px; background: #eff6ff; border-radius: 8px;">
-          <p style="margin: 0; color: #1e40af;">
-            ✅ Your payment has been processed successfully.<br>
-            📧 Keep this email as your receipt.
-          </p>
-        </div>
-        
-        <p style="text-align: center; margin-top: 30px; color: #666;">
-          Payment processed securely by Cashfree Payments
-        </p>
-      </body>
-    </html>
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; border-bottom: 1px solid #e5e7eb;"><strong>Transaction ID:</strong></td>
+            <td style="padding: 8px 0; border-bottom: 1px solid #e5e7eb; text-align: right;">${orderId}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; border-bottom: 1px solid #e5e7eb;"><strong>Amount Paid:</strong></td>
+            <td style="padding: 8px 0; border-bottom: 1px solid #e5e7eb; text-align: right; color: #10b981; font-weight: bold;">₹${amount}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; border-bottom: 1px solid #e5e7eb;"><strong>Customer:</strong></td>
+            <td style="padding: 8px 0; border-bottom: 1px solid #e5e7eb; text-align: right;">${customerName}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0;"><strong>Email:</strong></td>
+            <td style="padding: 8px 0; text-align: right;">${email}</td>
+          </tr>
+        </table>
+      </div>
+      
+      <div style="background: #ecfdf5; border: 2px solid #10b981; border-radius: 10px; padding: 20px; text-align: center;">
+        <h3 style="color: #065f46; margin: 0 0 8px 0;">✅ Payment Status: CONFIRMED</h3>
+        <p style="margin: 0; color: #047857;">Your transaction has been processed successfully.</p>
+      </div>
+      
+      <p style="text-align: center; margin-top: 20px; color: #666; font-size: 12px;">
+        Payment processed securely by Cashfree • Powered by PayForm
+      </p>
+    </div>
   `;
 };
 
