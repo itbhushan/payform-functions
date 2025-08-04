@@ -178,12 +178,13 @@ return {
 };
 
 // Send customer confirmation email
-// REPLACE the entire sendCustomerConfirmationEmail function with this version
+// REPLACE the sendCustomerConfirmationEmail function with this updated version
+
 const sendCustomerConfirmationEmail = async (orderData, email, formId) => {
   try {
     console.log(`📧 Sending confirmation email to ${email}`);
 
-    // Get form and admin info for personalized email
+    // Get form and admin info
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     
     const { data: formData, error: formError } = await supabase
@@ -199,18 +200,11 @@ const sendCustomerConfirmationEmail = async (orderData, email, formId) => {
       .eq('form_id', formId)
       .single();
 
-    if (formError || !formData) {
-      console.log('⚠️ Could not get form info, sending basic confirmation');
-    }
-
     const adminInfo = formData?.form_admins?.[0] || { name: 'PayForm Team' };
     const formName = formData?.form_name || 'Your Form';
     const adminId = formData?.admin_id;
 
-    // Generate CONFIRMATION email template (not payment request)
-    const confirmationEmailHtml = generateConfirmationEmailTemplate(orderData, email, formName, adminInfo);
-
-    // Use the existing working email system but with confirmation content
+    // Send confirmation email using the UPDATED edge function
     const emailResponse = await fetch(`${process.env.SUPABASE_URL}/functions/v1/send-payment-email`, {
       method: 'POST',
       headers: {
@@ -218,18 +212,16 @@ const sendCustomerConfirmationEmail = async (orderData, email, formId) => {
         'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
       },
       body: JSON.stringify({
-        // Override the template to send confirmation instead of payment request
         to: email,
         subject: `✅ Payment Confirmed - Order #${orderData.cf_order_id}`,
-        html: confirmationEmailHtml, // This is our confirmation template, not payment template
-        
-        // These fields ensure it's treated as a confirmation
-        isConfirmation: true,
-        orderData: orderData,
         customerName: orderData.customer_details?.customer_name || 'Customer',
         amount: orderData.order_amount,
-        formName: formName,
-        adminId: adminId || 'default'
+        adminId: adminId || 'default',
+        
+        // NEW FIELDS for confirmation email
+        isConfirmation: true,
+        orderData: orderData,
+        productName: formName
       })
     });
 
@@ -237,32 +229,10 @@ const sendCustomerConfirmationEmail = async (orderData, email, formId) => {
     console.log('📧 Email API response:', emailResult);
     
     if (emailResult.success) {
-      console.log(`✅ Confirmation email sent to ${email}`);
+      console.log(`✅ Confirmation email sent to ${email} (Type: ${emailResult.emailType})`);
       return true;
     } else {
       console.error(`❌ Failed to send confirmation email:`, emailResult.error);
-      
-      // Try alternative approach - send simple text confirmation
-      const simpleEmailResponse = await fetch(`${process.env.SUPABASE_URL}/functions/v1/send-payment-email`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
-        },
-        body: JSON.stringify({
-          to: email,
-          subject: `Payment Successful - ₹${orderData.order_amount}`,
-          html: generateSimpleConfirmationHtml(orderData, email),
-          adminId: adminId || 'default'
-        })
-      });
-
-      const simpleResult = await simpleEmailResponse.json();
-      if (simpleResult.success) {
-        console.log(`✅ Simple confirmation email sent to ${email}`);
-        return true;
-      }
-      
       return false;
     }
 
