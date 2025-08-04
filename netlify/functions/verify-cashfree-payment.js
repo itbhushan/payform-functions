@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const nodemailer = require('nodemailer'); // Add this line if missing
 
 exports.handler = async (event, context) => {
   const headers = {
@@ -177,6 +178,8 @@ return {
 };
 
 // Send customer confirmation email
+// REPLACE the entire sendCustomerConfirmationEmail function with this corrected version
+
 const sendCustomerConfirmationEmail = async (orderData, email, formId) => {
   try {
     console.log(`📧 Sending confirmation email to ${email}`);
@@ -208,39 +211,120 @@ const sendCustomerConfirmationEmail = async (orderData, email, formId) => {
     // Generate confirmation email template
     const emailHtml = generateConfirmationEmailTemplate(orderData, email, formName, adminInfo);
 
-    // Send email using same system as payment links
-    const emailResponse = await fetch(`${process.env.SUPABASE_URL}/functions/v1/send-payment-email`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
-      },
-      body: JSON.stringify({
-        to: email,
-        subject: `Payment Confirmation - ${orderData.cf_order_id}`,
-        html: emailHtml,
-        productName: 'Payment Confirmation',
-        amount: orderData.order_amount,
-        customerName: orderData.customer_details?.customer_name || 'Customer',
-        formName: formName,
-        adminId: adminId || 'default'
-      })
-    });
-
-    const emailResult = await emailResponse.json();
+    // Send email directly using nodemailer with Gmail SMTP (same system as your payment links)
+    const nodemailer = require('nodemailer');
     
-    if (emailResult.success) {
-      console.log(`✅ Confirmation email sent to ${email}`);
-      return true;
-    } else {
-      console.error(`❌ Failed to send confirmation email:`, emailResult.error);
+    // Get Gmail OAuth tokens for the form admin
+    const { data: tokenData } = await supabase
+      .from('google_auth_tokens')
+      .select('*')
+      .eq('admin_id', adminId)
+      .single();
+
+    if (!tokenData || !tokenData.access_token) {
+      console.error('❌ No Gmail tokens found for admin:', adminId);
       return false;
     }
 
+    // Create Gmail transporter
+    const transporter = nodemailer.createTransporter({
+      service: 'gmail',
+      auth: {
+        type: 'OAuth2',
+        user: tokenData.user_email || adminInfo.email,
+        accessToken: tokenData.access_token,
+        refreshToken: tokenData.refresh_token,
+        clientId: process.env.GOOGLE_CLIENT_ID,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET
+      }
+    });
+
+    // Send confirmation email
+    await transporter.sendMail({
+      from: `"${adminInfo.name || 'PayForm'}" <${tokenData.user_email || adminInfo.email}>`,
+      to: email,
+      subject: `Payment Confirmation - Order #${orderData.cf_order_id}`,
+      html: emailHtml
+    });
+
+    console.log(`✅ Confirmation email sent to ${email}`);
+    return true;
+
   } catch (error) {
     console.error('❌ Error sending confirmation email:', error);
+    
+    // Fallback: Try using the existing Supabase function but with confirmation content
+    try {
+      console.log('🔄 Trying fallback email method...');
+      
+      const fallbackHtml = generateSimpleConfirmationEmail(orderData, email);
+      
+      const emailResponse = await fetch(`${process.env.SUPABASE_URL}/functions/v1/send-confirmation-email`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+        },
+        body: JSON.stringify({
+          to: email,
+          subject: `Payment Successful - Order #${orderData.cf_order_id}`,
+          html: fallbackHtml,
+          orderData: orderData
+        })
+      });
+
+      if (emailResponse.ok) {
+        console.log('✅ Fallback confirmation email sent');
+        return true;
+      }
+    } catch (fallbackError) {
+      console.error('❌ Fallback email also failed:', fallbackError);
+    }
+    
     return false;
   }
+};
+
+// Simple confirmation email template (fallback)
+const generateSimpleConfirmationEmail = (orderData, email) => {
+  const amount = orderData.order_amount;
+  const orderId = orderData.cf_order_id;
+  const customerName = orderData.customer_details?.customer_name || 'Customer';
+  
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Payment Confirmation</title>
+      </head>
+      <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="text-align: center; margin-bottom: 30px;">
+          <h1 style="color: #10b981;">🎉 Payment Successful!</h1>
+          <p style="font-size: 18px;">Thank you, ${customerName}!</p>
+        </div>
+        
+        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 20px;">
+          <h3 style="color: #065f46; margin-top: 0;">Payment Details:</h3>
+          <p><strong>Transaction ID:</strong> ${orderId}</p>
+          <p><strong>Amount Paid:</strong> ₹${amount}</p>
+          <p><strong>Email:</strong> ${email}</p>
+          <p><strong>Status:</strong> ✅ CONFIRMED</p>
+        </div>
+        
+        <div style="margin-top: 20px; padding: 15px; background: #eff6ff; border-radius: 8px;">
+          <p style="margin: 0; color: #1e40af;">
+            ✅ Your payment has been processed successfully.<br>
+            📧 Keep this email as your receipt.
+          </p>
+        </div>
+        
+        <p style="text-align: center; margin-top: 30px; color: #666;">
+          Payment processed securely by Cashfree Payments
+        </p>
+      </body>
+    </html>
+  `;
 };
 
 // Generate customer confirmation email template
