@@ -116,6 +116,7 @@ export const useDashboardData = (adminId?: string) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+// REPLACE the entire fetchData function inside useDashboardData with this:
 const fetchData = async () => {
   if (!adminId) {
     setLoading(false);
@@ -128,80 +129,120 @@ const fetchData = async () => {
     setLoading(true);
     setError(null);
     
-// Fetch transactions for this admin
-const { data: transactionsData, error: transactionsError } = await supabase
-  .from('transactions')
-  .select('*')
-  .eq('admin_id', adminId)
-  .order('created_at', { ascending: false })
-  // Remove the abortSignal line completely
-  .order('created_at', { ascending: false });
+    // Step 1: Fetch transactions for this admin
+    const { data: transactionsData, error: transactionsError } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('admin_id', adminId)
+      .order('created_at', { ascending: false });
     
-      if (transactionsError) {
-        throw transactionsError;
-      }
+    if (transactionsError) {
+      throw transactionsError;
+    }
 
-      const allTransactions = transactionsData || [];
-      setTransactions(allTransactions);
-  
-      // Calculate stats
-      const totalSales = allTransactions.reduce((sum, t) => sum + (t.payment_amount || 0), 0);
-      const completedTransactions = allTransactions.filter(t => t.payment_status === 'paid').length;
-      const pendingTransactions = allTransactions.filter(t => t.payment_status === 'pending').length;
-      const totalEarnings = allTransactions.reduce((sum, t) => sum + (t.net_amount_to_admin || 0), 0);
+    console.log('💳 [DEBUG] Raw transactions found:', transactionsData?.length || 0);
 
-// Enhanced debug logs
-console.log('🔍 DEBUG: Admin ID:', adminId);
-console.log('🔍 DEBUG: Transactions found:', allTransactions?.length || 0);
-console.log('🔍 DEBUG: Sample transaction:', allTransactions?.[0]);
-console.log('🔍 DEBUG: Stats calculated:', {
-  totalSales,
-  totalTransactions: allTransactions.length,
-  completedTransactions,
-  pendingTransactions,
-  totalEarnings
-});      
+    // Step 2: Fetch form configs for this admin to get form names
+    const { data: formConfigs, error: formError } = await supabase
+      .from('form_configs')
+      .select('form_id, form_name, form_url')
+      .eq('admin_id', adminId);
+
+    if (formError) {
+      console.error('❌ [DEBUG] Form configs fetch error:', formError);
+      // Continue without form names rather than failing
+    }
+
+    console.log('📝 [DEBUG] Form configs found:', formConfigs?.length || 0);
+
+    // Step 3: Create form lookup map
+    const formLookup: { [key: string]: { name: string; url: string } } = {};
+    if (formConfigs) {
+      formConfigs.forEach(form => {
+        formLookup[form.form_id] = {
+          name: form.form_name,
+          url: form.form_url
+        };
+        console.log(`📋 [DEBUG] Form mapping: "${form.form_id}" -> "${form.form_name}"`);
+      });
+    }
+
+    // Step 4: Map transactions with form names
+    const allTransactions: Transaction[] = (transactionsData || []).map((t, index) => {
+      const formInfo = formLookup[t.form_id] || {};
+      
+      console.log(`🔍 [DEBUG] Transaction ${index + 1} (ID: ${t.id}): form_id="${t.form_id}" -> form_name="${formInfo.name || 'Unknown Form'}"`);
+      
+      return {
+        ...t,
+        // Add form name to transaction object
+        formName: formInfo.name || 'Unknown Form',
+        formUrl: formInfo.url || null
+      } as Transaction & { formName: string; formUrl: string | null };
+    });
+
+    console.log('✅ [DEBUG] Transactions mapped with form names');
+
+    setTransactions(allTransactions);
+
+    // Calculate stats
+    const totalSales = allTransactions.reduce((sum, t) => sum + (t.payment_amount || 0), 0);
+    const completedTransactions = allTransactions.filter(t => t.payment_status === 'paid').length;
+    const pendingTransactions = allTransactions.filter(t => t.payment_status === 'pending').length;
+    const totalEarnings = allTransactions.reduce((sum, t) => sum + (t.net_amount_to_admin || 0), 0);
+
+    // Enhanced debug logs
+    console.log('🔍 DEBUG: Admin ID:', adminId);
+    console.log('🔍 DEBUG: Transactions found:', allTransactions?.length || 0);
+    console.log('🔍 DEBUG: Sample transaction with form name:', allTransactions?.[0]);
+    console.log('🔍 DEBUG: Stats calculated:', {
+      totalSales,
+      totalTransactions: allTransactions.length,
+      completedTransactions,
+      pendingTransactions,
+      totalEarnings
+    });      
     
-const stats: DashboardStats = {
-  totalSales,
-  totalTransactions: allTransactions.length,
-  completedTransactions,
-  pendingTransactions,
-  totalEarnings
-};
+    const stats: DashboardStats = {
+      totalSales,
+      totalTransactions: allTransactions.length,
+      completedTransactions,
+      pendingTransactions,
+      totalEarnings
+    };
 
-console.log('✅ SETTING NEW STATS:', stats);
-console.log('✅ SETTING NEW TRANSACTIONS:', allTransactions.length);
+    console.log('✅ SETTING NEW STATS:', stats);
+    console.log('✅ SETTING NEW TRANSACTIONS:', allTransactions.length);
 
-// Force new object references to trigger re-render
-setData({ ...stats });
-setTransactions([...allTransactions]);
+    // Force new object references to trigger re-render
+    setData({ ...stats });
+    setTransactions([...allTransactions]);
 
-console.log('✅ STATE UPDATE COMPLETE');    
+    console.log('✅ STATE UPDATE COMPLETE');    
     
-} catch (err: any) {
-  if (err.name === 'AbortError') {
-    console.log('Dashboard request cancelled');
-    return;
-  }
-  console.error('Error fetching dashboard data:', err);
-  setError(err.message || 'Failed to load dashboard data');
-  
-  // Show empty state - no mock data
-  setData({
-    totalSales: 0,
-    totalTransactions: 0,
-    completedTransactions: 0,
-    pendingTransactions: 0,
-    totalEarnings: 0
-  });
-  setTransactions([]);
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      console.log('Dashboard request cancelled');
+      return;
+    }
+    console.error('Error fetching dashboard data:', err);
+    setError(err.message || 'Failed to load dashboard data');
+    
+    // Show empty state - no mock data
+    setData({
+      totalSales: 0,
+      totalTransactions: 0,
+      completedTransactions: 0,
+      pendingTransactions: 0,
+      totalEarnings: 0
+    });
+    setTransactions([]);
     
   } finally {
-      setLoading(false);
-    }
-  };
-
+    setLoading(false);
+  }
+};
+  
 // Fix the useEffect in useDashboardData:
 useEffect(() => {
   fetchData();
