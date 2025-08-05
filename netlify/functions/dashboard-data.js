@@ -208,29 +208,22 @@ async function fetchDashboardStats(supabase, adminId) {
   }
 }
 
-// REPLACE the entire fetchRecentTransactions function with this updated version
-
+// REPLACE the entire fetchRecentTransactions function with this corrected version
 async function fetchRecentTransactions(supabase, adminId) {
   try {
     console.log('💳 Fetching transactions for admin:', adminId);
 
-    // Updated query to JOIN with form_configs to get form names
-    const { data: transactions, error } = await supabase
+    // Step 1: Get all transactions for the admin
+    const { data: transactions, error: transactionError } = await supabase
       .from('transactions')
-      .select(`
-        *,
-        form_configs (
-          form_name,
-          form_url
-        )
-      `)
+      .select('*')
       .eq('admin_id', adminId)
       .order('created_at', { ascending: false })
       .limit(50);
 
-    if (error) {
-      console.error('Transactions fetch error:', error);
-      throw error;
+    if (transactionError) {
+      console.error('Transactions fetch error:', transactionError);
+      throw transactionError;
     }
 
     console.log('Found transactions:', transactions?.length || 0);
@@ -239,33 +232,66 @@ async function fetchRecentTransactions(supabase, adminId) {
       return [];
     }
 
-    return transactions.map(t => ({
-      id: t.id,
-      transactionId: t.cashfree_payment_id || t.transaction_id || `TXN_${t.id.toString().slice(0, 8)}`,
-      email: t.email,
-      customerName: t.customer_name || 'Unknown',
-      productName: t.product_name || 'Unknown Product',
+    // Step 2: Get all form configs for the admin
+    const { data: formConfigs, error: formError } = await supabase
+      .from('form_configs')
+      .select('*')
+      .eq('admin_id', adminId);
+
+    if (formError) {
+      console.error('Form configs fetch error:', formError);
+      // Continue without form names rather than failing completely
+    }
+
+    console.log('Found form configs:', formConfigs?.length || 0);
+
+    // Step 3: Create a lookup map for form names
+    const formLookup = {};
+    if (formConfigs) {
+      formConfigs.forEach(form => {
+        formLookup[form.form_id] = {
+          name: form.form_name,
+          url: form.form_url
+        };
+      });
+    }
+
+    console.log('📝 Form lookup created:', Object.keys(formLookup).length, 'forms');
+
+    // Step 4: Map transactions with form names
+    return transactions.map(t => {
+      const formInfo = formLookup[t.form_id] || {};
       
-      // 🆕 NEW: Add form name from the joined form_configs table
-      formName: t.form_configs?.form_name || 'Unknown Form',
-      formUrl: t.form_configs?.form_url || null,
+      console.log(`🔍 Transaction ${t.id}: form_id="${t.form_id}" -> form_name="${formInfo.name || 'Unknown Form'}"`);
       
-      amount: parseFloat(t.payment_amount || 0).toFixed(2),
-      commission: parseFloat(t.platform_commission || 0).toFixed(2),
-      netAmount: parseFloat(t.net_amount_to_admin || 0).toFixed(2),
-      gatewayFee: parseFloat(t.gateway_fee || 0).toFixed(2),
-      status: t.payment_status || 'pending',
-      paymentMethod: t.payment_method || 'Cashfree',
-      createdAt: t.created_at,
-      formattedDate: new Date(t.created_at).toLocaleDateString('en-IN'),
-      formattedTime: new Date(t.created_at).toLocaleTimeString('en-IN', { 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      }),
-      
-      // 🆕 NEW: Add form ID for reference
-      formId: t.form_id
-    }));
+      return {
+        id: t.id,
+        transactionId: t.cashfree_payment_id || t.transaction_id || `TXN_${t.id.toString().slice(0, 8)}`,
+        email: t.email,
+        customerName: t.customer_name || 'Unknown',
+        productName: t.product_name || 'Unknown Product',
+        
+        // 🆕 FIXED: Use the lookup map to get form name
+        formName: formInfo.name || 'Unknown Form',
+        formUrl: formInfo.url || null,
+        
+        amount: parseFloat(t.payment_amount || 0).toFixed(2),
+        commission: parseFloat(t.platform_commission || 0).toFixed(2),
+        netAmount: parseFloat(t.net_amount_to_admin || 0).toFixed(2),
+        gatewayFee: parseFloat(t.gateway_fee || 0).toFixed(2),
+        status: t.payment_status || 'pending',
+        paymentMethod: t.payment_method || 'Cashfree',
+        createdAt: t.created_at,
+        formattedDate: new Date(t.created_at).toLocaleDateString('en-IN'),
+        formattedTime: new Date(t.created_at).toLocaleTimeString('en-IN', { 
+          hour: '2-digit', 
+          minute: '2-digit' 
+        }),
+        
+        // Form reference data
+        formId: t.form_id
+      };
+    });
 
   } catch (error) {
     console.error('Error fetching transactions:', error);
