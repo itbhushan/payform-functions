@@ -1,4 +1,4 @@
-// src/App.tsx - Complete PayForm with Authentication + Existing Components
+// src/App.tsx - Complete PayForm with Authentication + Fixed HTML Comments + Form Name Column
 import React, { useState } from 'react';
 import type { ReactNode } from 'react';
 import { MyForms } from './components/dashboard/MyForms';
@@ -566,79 +566,98 @@ const DashboardContent: React.FC<{
         </div>
         
         <div className="overflow-x-auto">
-{/* REPLACE your existing table HTML with this updated version */}
-
-<table className="min-w-full divide-y divide-gray-200">
-  <thead className="bg-gray-50">
-    <tr>
-      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-        Transaction ID
-      </th>
-      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-        Customer
-      </th>
-      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-        Product
-      </th>
-      <!-- 🆕 NEW COLUMN: Form Name -->
-      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-        Form Name
-      </th>
-      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-        Amount
-      </th>
-      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-        Your Earnings
-      </th>
-      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-        Status
-      </th>
-      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-        Date
-      </th>
-    </tr>
-  </thead>
-  <tbody className="bg-white divide-y divide-gray-200">
-    {/* Example transaction row - UPDATE your existing rows */}
-    <tr>
-      <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
-        payform_12345...
-      </td>
-      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-        <div>
-          <div className="font-medium">BABOO</div>
-          <div className="text-gray-500">customer@example.com</div>
+          {/* ✅ FIXED TABLE WITH FORM NAME COLUMN - No HTML Comments */}
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Transaction ID
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Customer
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Product
+                </th>
+                {/* ✅ NEW COLUMN: Form Name */}
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Form Name
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Amount
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Your Earnings
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Status
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Date
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {transactions && transactions.length > 0 ? (
+                transactions.map((transaction, index) => (
+                  <tr key={transaction.id || index} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
+                      {transaction.transaction_id || transaction.cashfree_order_id || `#${transaction.id}`}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <div>
+                        <div className="font-medium">{transaction.customer_name || 'N/A'}</div>
+                        <div className="text-gray-500">{transaction.email}</div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {transaction.product_name || 'Payment'}
+                    </td>
+                    {/* ✅ NEW CELL: Form Name */}
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <span className="inline-flex px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full">
+                        📝 {transaction.formName || transaction.form_name || 'Unknown Form'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      ₹{transaction.payment_amount?.toFixed(2) || '0.00'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600 font-medium">
+                      ₹{transaction.net_amount_to_admin?.toFixed(2) || (transaction.payment_amount * 0.94).toFixed(2)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                        transaction.payment_status === 'paid' || transaction.payment_status === 'SUCCESS'
+                          ? 'bg-green-100 text-green-800'
+                          : transaction.payment_status === 'pending' || transaction.payment_status === 'ACTIVE'
+                          ? 'bg-yellow-100 text-yellow-800'
+                          : 'bg-red-100 text-red-800'
+                      }`}>
+                        {transaction.payment_status === 'paid' || transaction.payment_status === 'SUCCESS' 
+                          ? 'Paid' 
+                          : transaction.payment_status === 'pending' || transaction.payment_status === 'ACTIVE'
+                          ? 'Pending'
+                          : 'Failed'
+                        }
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {new Date(transaction.created_at).toLocaleDateString('en-IN')}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
+                    <div className="text-4xl mb-4">💳</div>
+                    <p className="text-lg font-medium">No transactions yet</p>
+                    <p className="text-sm">Your transactions will appear here once customers start paying</p>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
-      </td>
-      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-        E-Book
-      </td>
-      <!-- 🆕 NEW CELL: Form Name -->
-      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-        <div className="flex items-center">
-          <span className="inline-flex px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full">
-            📝 Course Registration Form
-          </span>
-        </div>
-      </td>
-      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-        ₹299
-      </td>
-      <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600 font-medium">
-        ₹281.05
-      </td>
-      <td className="px-6 py-4 whitespace-nowrap">
-        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-          Paid
-        </span>
-      </td>
-      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-        4/8/2025
-      </td>
-    </tr>
-  </tbody>
-</table>
-</div>
       </div>
     </div>
   );
@@ -960,7 +979,7 @@ const AdminManagement: React.FC = () => {
 const App: React.FC = () => {
   const { user, loading } = useAuth();
 
-  // 🆕 ADD THIS ENTIRE USEEFFECT BLOCK HERE
+  // Google OAuth URL parameter handling
   React.useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const authStatus = urlParams.get('auth');
