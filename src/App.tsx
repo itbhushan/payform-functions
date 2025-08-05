@@ -491,15 +491,15 @@ const DashboardContent: React.FC<{
     );
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <div className="bg-white p-6 rounded-lg shadow-sm border">
-          <div className="flex items-center justify-between">
+return (
+  <div className="space-y-4">
+    {/* Stats Cards */}
+    <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+      <div className="bg-white p-4 rounded-lg shadow-sm border">
+        <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Total Revenue</p>
-              <p className="text-2xl font-bold text-green-600">₹{stats.totalSales?.toLocaleString() || 0}</p>
+              <p className="text-xs font-medium text-gray-600">Total Revenue</p>
+              <p className="text-xl font-bold text-green-600">₹{stats.totalSales?.toLocaleString() || 0}</p>
             </div>
             <div className="text-green-500 text-2xl">💰</div>
           </div>
@@ -604,22 +604,22 @@ const DashboardContent: React.FC<{
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
                       {transaction.transaction_id || transaction.cashfree_order_id || `#${transaction.id}`}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
                       <div>
                         <div className="font-medium">{transaction.customer_name || 'N/A'}</div>
                         <div className="text-gray-500">{transaction.email}</div>
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
                       {transaction.product_name || 'Payment'}
                     </td>
                     {/* ✅ NEW CELL: Form Name */}
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
                       <span className="inline-flex px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full">
                         📝 {transaction.formName || transaction.form_name || 'Unknown Form'}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
                       ₹{transaction.payment_amount?.toFixed(2) || '0.00'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600 font-medium">
@@ -641,7 +641,7 @@ const DashboardContent: React.FC<{
                         }
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
                       {new Date(transaction.created_at).toLocaleDateString('en-IN')}
                     </td>
                   </tr>
