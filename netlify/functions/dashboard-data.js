@@ -208,10 +208,10 @@ async function fetchDashboardStats(supabase, adminId) {
   }
 }
 
-// REPLACE the entire fetchRecentTransactions function with this corrected version
+// REPLACE fetchRecentTransactions with this enhanced debug version
 async function fetchRecentTransactions(supabase, adminId) {
   try {
-    console.log('💳 Fetching transactions for admin:', adminId);
+    console.log('💳 [DEBUG] Fetching transactions for admin:', adminId);
 
     // Step 1: Get all transactions for the admin
     const { data: transactions, error: transactionError } = await supabase
@@ -222,33 +222,62 @@ async function fetchRecentTransactions(supabase, adminId) {
       .limit(50);
 
     if (transactionError) {
-      console.error('Transactions fetch error:', transactionError);
+      console.error('❌ [DEBUG] Transactions fetch error:', transactionError);
       throw transactionError;
     }
 
-    console.log('Found transactions:', transactions?.length || 0);
+    console.log('✅ [DEBUG] Found transactions:', transactions?.length || 0);
+    
+    // Debug: Show first transaction details
+    if (transactions && transactions.length > 0) {
+      console.log('🔍 [DEBUG] First transaction details:', {
+        id: transactions[0].id,
+        form_id: transactions[0].form_id,
+        admin_id: transactions[0].admin_id,
+        email: transactions[0].email
+      });
+    }
 
     if (!transactions || transactions.length === 0) {
+      console.log('⚠️ [DEBUG] No transactions found, returning empty array');
       return [];
     }
 
     // Step 2: Get all form configs for the admin
+    console.log('📝 [DEBUG] Fetching form configs for admin:', adminId);
+    
     const { data: formConfigs, error: formError } = await supabase
       .from('form_configs')
       .select('*')
       .eq('admin_id', adminId);
 
     if (formError) {
-      console.error('Form configs fetch error:', formError);
+      console.error('❌ [DEBUG] Form configs fetch error:', formError);
       // Continue without form names rather than failing completely
     }
 
-    console.log('Found form configs:', formConfigs?.length || 0);
+    console.log('✅ [DEBUG] Found form configs:', formConfigs?.length || 0);
+    
+    // Debug: Show all form configs
+    if (formConfigs && formConfigs.length > 0) {
+      console.log('🔍 [DEBUG] Form configs details:');
+      formConfigs.forEach((form, index) => {
+        console.log(`   Form ${index + 1}:`, {
+          id: form.id,
+          form_id: form.form_id,
+          form_name: form.form_name,
+          admin_id: form.admin_id
+        });
+      });
+    } else {
+      console.log('⚠️ [DEBUG] No form configs found for admin:', adminId);
+    }
 
     // Step 3: Create a lookup map for form names
     const formLookup = {};
     if (formConfigs) {
       formConfigs.forEach(form => {
+        console.log(`🗂️ [DEBUG] Adding to lookup: "${form.form_id}" -> "${form.form_name}"`);
         formLookup[form.form_id] = {
           name: form.form_name,
           url: form.form_url
@@ -256,13 +285,19 @@ async function fetchRecentTransactions(supabase, adminId) {
       });
     }
 
-    console.log('📝 Form lookup created:', Object.keys(formLookup).length, 'forms');
+    console.log('📋 [DEBUG] Form lookup created with keys:', Object.keys(formLookup));
+    console.log('📋 [DEBUG] Form lookup contents:', formLookup);
 
     // Step 4: Map transactions with form names
-    return transactions.map(t => {
+    console.log('🔄 [DEBUG] Mapping transactions with form names...');
+    
+    const mappedTransactions = transactions.map((t, index) => {
       const formInfo = formLookup[t.form_id] || {};
       
-      console.log(`🔍 Transaction ${t.id}: form_id="${t.form_id}" -> form_name="${formInfo.name || 'Unknown Form'}"`);
+      console.log(`🔍 [DEBUG] Transaction ${index + 1} (ID: ${t.id}):`);
+      console.log(`   - form_id: "${t.form_id}"`);
+      console.log(`   - lookup result:`, formInfo);
+      console.log(`   - final form_name: "${formInfo.name || 'Unknown Form'}"`);
       
       return {
         id: t.id,
@@ -293,8 +328,12 @@ async function fetchRecentTransactions(supabase, adminId) {
       };
     });
 
+    console.log('✅ [DEBUG] Transaction mapping completed. First mapped transaction:', mappedTransactions[0]);
+    
+    return mappedTransactions;
+
   } catch (error) {
-    console.error('Error fetching transactions:', error);
+    console.error('❌ [DEBUG] Error in fetchRecentTransactions:', error);
     return [];
   }
 }
