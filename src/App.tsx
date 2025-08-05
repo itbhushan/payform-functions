@@ -566,7 +566,7 @@ const DashboardContent: React.FC<{
         </div>
         
         <div className="overflow-x-auto">
-<!-- REPLACE your existing table HTML with this updated version -->
+{/* REPLACE your existing table HTML with this updated version */}
 
 <table className="min-w-full divide-y divide-gray-200">
   <thead className="bg-gray-50">
