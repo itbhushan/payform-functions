@@ -208,12 +208,12 @@ async function fetchDashboardStats(supabase, adminId) {
   }
 }
 
-// REPLACE fetchRecentTransactions with this enhanced debug version
+// COMPLETE REPLACEMENT for fetchRecentTransactions function
 async function fetchRecentTransactions(supabase, adminId) {
   try {
-    console.log('💳 [DEBUG] Fetching transactions for admin:', adminId);
+    console.log('💳 Fetching transactions for admin:', adminId);
 
-    // Step 1: Get all transactions for the admin
+    // Get transactions
     const { data: transactions, error: transactionError } = await supabase
       .from('transactions')
       .select('*')
@@ -222,82 +222,41 @@ async function fetchRecentTransactions(supabase, adminId) {
       .limit(50);
 
     if (transactionError) {
-      console.error('❌ [DEBUG] Transactions fetch error:', transactionError);
+      console.error('Transactions fetch error:', transactionError);
       throw transactionError;
     }
 
-    console.log('✅ [DEBUG] Found transactions:', transactions?.length || 0);
-    
-    // Debug: Show first transaction details
-    if (transactions && transactions.length > 0) {
-      console.log('🔍 [DEBUG] First transaction details:', {
-        id: transactions[0].id,
-        form_id: transactions[0].form_id,
-        admin_id: transactions[0].admin_id,
-        email: transactions[0].email
-      });
-    }
+    console.log('Found transactions:', transactions?.length || 0);
 
     if (!transactions || transactions.length === 0) {
-      console.log('⚠️ [DEBUG] No transactions found, returning empty array');
       return [];
     }
 
-    // Step 2: Get all form configs for the admin
-    console.log('📝 [DEBUG] Fetching form configs for admin:', adminId);
-    
+    // Get form configs for this admin
     const { data: formConfigs, error: formError } = await supabase
       .from('form_configs')
-      .select('*')
+      .select('form_id, form_name, form_url')
       .eq('admin_id', adminId);
 
-    if (formError) {
-      console.error('❌ [DEBUG] Form configs fetch error:', formError);
-      // Continue without form names rather than failing completely
-    }
+    console.log('📝 Found form configs:', formConfigs?.length || 0);
 
-    console.log('✅ [DEBUG] Found form configs:', formConfigs?.length || 0);
-    
-    // Debug: Show all form configs
-    if (formConfigs && formConfigs.length > 0) {
-      console.log('🔍 [DEBUG] Form configs details:');
-      formConfigs.forEach((form, index) => {
-        console.log(`   Form ${index + 1}:`, {
-          id: form.id,
-          form_id: form.form_id,
-          form_name: form.form_name,
-          admin_id: form.admin_id
-        });
-      });
-    } else {
-      console.log('⚠️ [DEBUG] No form configs found for admin:', adminId);
-    }
-
-    // Step 3: Create a lookup map for form names
+    // Create form lookup
     const formLookup = {};
     if (formConfigs) {
       formConfigs.forEach(form => {
-        console.log(`🗂️ [DEBUG] Adding to lookup: "${form.form_id}" -> "${form.form_name}"`);
         formLookup[form.form_id] = {
           name: form.form_name,
           url: form.form_url
         };
+        console.log(`📋 Form mapping: "${form.form_id}" -> "${form.form_name}"`);
       });
     }
 
-    console.log('📋 [DEBUG] Form lookup created with keys:', Object.keys(formLookup));
-    console.log('📋 [DEBUG] Form lookup contents:', formLookup);
-
-    // Step 4: Map transactions with form names
-    console.log('🔄 [DEBUG] Mapping transactions with form names...');
-    
-    const mappedTransactions = transactions.map((t, index) => {
+    // Map transactions with form names
+    return transactions.map(t => {
       const formInfo = formLookup[t.form_id] || {};
       
-      console.log(`🔍 [DEBUG] Transaction ${index + 1} (ID: ${t.id}):`);
-      console.log(`   - form_id: "${t.form_id}"`);
-      console.log(`   - lookup result:`, formInfo);
-      console.log(`   - final form_name: "${formInfo.name || 'Unknown Form'}"`);
+      console.log(`🔍 Txn ${t.id}: form_id="${t.form_id}" -> form_name="${formInfo.name || 'Unknown Form'}"`);
       
       return {
         id: t.id,
@@ -305,11 +264,8 @@ async function fetchRecentTransactions(supabase, adminId) {
         email: t.email,
         customerName: t.customer_name || 'Unknown',
         productName: t.product_name || 'Unknown Product',
-        
-        // 🆕 FIXED: Use the lookup map to get form name
         formName: formInfo.name || 'Unknown Form',
         formUrl: formInfo.url || null,
-        
         amount: parseFloat(t.payment_amount || 0).toFixed(2),
         commission: parseFloat(t.platform_commission || 0).toFixed(2),
         netAmount: parseFloat(t.net_amount_to_admin || 0).toFixed(2),
@@ -322,18 +278,12 @@ async function fetchRecentTransactions(supabase, adminId) {
           hour: '2-digit', 
           minute: '2-digit' 
         }),
-        
-        // Form reference data
         formId: t.form_id
       };
     });
 
-    console.log('✅ [DEBUG] Transaction mapping completed. First mapped transaction:', mappedTransactions[0]);
-    
-    return mappedTransactions;
-
   } catch (error) {
-    console.error('❌ [DEBUG] Error in fetchRecentTransactions:', error);
+    console.error('Error fetching transactions:', error);
     return [];
   }
 }
