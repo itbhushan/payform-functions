@@ -422,7 +422,7 @@ const handleRefresh = React.useCallback(() => {
 
 // ALL YOUR EXISTING COMPONENTS (Copy from your current App.tsx)
 
-// Dashboard Content Component with Real Data
+// Dashboard Content Component with Form Filter and CSV Export
 const DashboardContent: React.FC<{ 
   stats: any;
   transactions: Transaction[];
@@ -430,6 +430,9 @@ const DashboardContent: React.FC<{
   error: string | null;
   onRefresh: () => void;
 }> = ({ stats, transactions, loading, error, onRefresh }) => {
+  
+  // 🆕 NEW: Filter state for form names
+  const [selectedFormFilter, setSelectedFormFilter] = useState<string>('all');
   
   if (loading) {
     return (
@@ -491,65 +494,180 @@ const DashboardContent: React.FC<{
     );
   }
 
-return (
-  <div className="space-y-4">
-    {/* Stats Cards */}
-    <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-      <div className="bg-white p-4 rounded-lg shadow-sm border">
-        <div className="flex items-center justify-between">
+  // 🆕 NEW: Get unique form names from transactions
+  const uniqueFormNames = React.useMemo(() => {
+    if (!transactions || transactions.length === 0) return [];
+    
+    const formNames = transactions
+      .map(t => t.formName || t.form_name || 'Unknown Form')
+      .filter(name => name && name !== 'Unknown Form');
+    
+    return [...new Set(formNames)].sort();
+  }, [transactions]);
+
+  // 🆕 NEW: Filter transactions based on selected form
+  const filteredTransactions = React.useMemo(() => {
+    if (!transactions) return [];
+    
+    if (selectedFormFilter === 'all') {
+      return transactions;
+    }
+    
+    return transactions.filter(t => 
+      (t.formName || t.form_name || 'Unknown Form') === selectedFormFilter
+    );
+  }, [transactions, selectedFormFilter]);
+
+  // 🆕 NEW: Recalculate stats from filtered transactions
+  const filteredStats = React.useMemo(() => {
+    if (!filteredTransactions || filteredTransactions.length === 0) {
+      return {
+        totalSales: 0,
+        totalTransactions: 0,
+        completedTransactions: 0,
+        pendingTransactions: 0,
+        totalEarnings: 0
+      };
+    }
+
+    const totalSales = filteredTransactions.reduce((sum, t) => sum + (t.payment_amount || 0), 0);
+    const completedTransactions = filteredTransactions.filter(t => t.payment_status === 'paid' || t.payment_status === 'SUCCESS').length;
+    const pendingTransactions = filteredTransactions.filter(t => t.payment_status === 'pending' || t.payment_status === 'ACTIVE').length;
+    const totalEarnings = filteredTransactions.reduce((sum, t) => sum + (t.net_amount_to_admin || 0), 0);
+
+    return {
+      totalSales,
+      totalTransactions: filteredTransactions.length,
+      completedTransactions,
+      pendingTransactions,
+      totalEarnings
+    };
+  }, [filteredTransactions]);
+
+  // 🆕 NEW: CSV Export Function
+  const exportFilteredCSV = React.useCallback(() => {
+    if (!filteredTransactions || filteredTransactions.length === 0) {
+      alert('No transactions to export!');
+      return;
+    }
+
+    // Create CSV headers
+    const headers = [
+      'Transaction ID',
+      'Date',
+      'Customer Name',
+      'Customer Email',
+      'Product',
+      'Form Name',
+      'Amount',
+      'Your Earnings',
+      'Gateway Fee',
+      'Platform Commission',
+      'Status',
+      'Payment Provider',
+      'Cashfree Order ID'
+    ];
+
+    // Convert transactions to CSV rows
+    const csvRows = filteredTransactions.map(t => [
+      t.transaction_id || t.cashfree_order_id || `#${t.id}`,
+      new Date(t.created_at).toLocaleDateString('en-IN'),
+      `"${t.customer_name || 'N/A'}"`,
+      t.email,
+      `"${t.product_name || 'Payment'}"`,
+      `"${t.formName || t.form_name || 'Unknown Form'}"`,
+      t.payment_amount?.toFixed(2) || '0.00',
+      t.net_amount_to_admin?.toFixed(2) || (t.payment_amount * 0.94).toFixed(2),
+      t.gateway_fee?.toFixed(2) || '0.00',
+      t.platform_commission?.toFixed(2) || '0.00',
+      t.payment_status || 'pending',
+      t.payment_provider || 'cashfree',
+      t.cashfree_order_id || ''
+    ]);
+
+    // Combine headers and rows
+    const csvContent = [headers, ...csvRows]
+      .map(row => row.join(','))
+      .join('\n');
+
+    // Create and download file
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    
+    // Generate filename with filter info
+    const filterSuffix = selectedFormFilter === 'all' ? 'All_Forms' : selectedFormFilter.replace(/[^a-zA-Z0-9]/g, '_');
+    const fileName = `PayForm_Transactions_${filterSuffix}_${new Date().toISOString().split('T')[0]}.csv`;
+    link.setAttribute('download', fileName);
+    
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    console.log(`✅ CSV exported: ${filteredTransactions.length} transactions for filter "${selectedFormFilter}"`);
+  }, [filteredTransactions, selectedFormFilter]);
+
+  return (
+    <div className="space-y-4">
+      {/* Stats Cards - Using Filtered Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+        <div className="bg-white p-4 rounded-lg shadow-sm border">
+          <div className="flex items-center justify-between">
             <div>
               <p className="text-xs font-medium text-gray-600">Total Revenue</p>
-              <p className="text-xl font-bold text-green-600">₹{stats.totalSales?.toLocaleString() || 0}</p>
+              <p className="text-xl font-bold text-green-600">₹{filteredStats.totalSales?.toLocaleString() || 0}</p>
             </div>
             <div className="text-green-500 text-2xl">💰</div>
           </div>
         </div>
         
-        <div className="bg-white p-6 rounded-lg shadow-sm border">
+        <div className="bg-white p-4 rounded-lg shadow-sm border">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Transactions</p>
-              <p className="text-2xl font-bold text-blue-600">{stats.totalTransactions || 0}</p>
+              <p className="text-xs font-medium text-gray-600">Transactions</p>
+              <p className="text-xl font-bold text-blue-600">{filteredStats.totalTransactions || 0}</p>
             </div>
             <div className="text-blue-500 text-2xl">📊</div>
           </div>
         </div>
         
-        <div className="bg-white p-6 rounded-lg shadow-sm border">
+        <div className="bg-white p-4 rounded-lg shadow-sm border">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Completed</p>
-              <p className="text-2xl font-bold text-green-600">{stats.completedTransactions || 0}</p>
+              <p className="text-xs font-medium text-gray-600">Completed</p>
+              <p className="text-xl font-bold text-green-600">{filteredStats.completedTransactions || 0}</p>
             </div>
             <div className="text-green-500 text-2xl">✅</div>
           </div>
         </div>
         
-        <div className="bg-white p-6 rounded-lg shadow-sm border">
+        <div className="bg-white p-4 rounded-lg shadow-sm border">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Pending</p>
-              <p className="text-2xl font-bold text-yellow-600">{stats.pendingTransactions || 0}</p>
+              <p className="text-xs font-medium text-gray-600">Pending</p>
+              <p className="text-xl font-bold text-yellow-600">{filteredStats.pendingTransactions || 0}</p>
             </div>
             <div className="text-yellow-500 text-2xl">⏳</div>
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-lg shadow-sm border">
+        <div className="bg-white p-4 rounded-lg shadow-sm border">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Your Earnings</p>
-              <p className="text-2xl font-bold text-purple-600">₹{stats.totalEarnings?.toFixed(2) || '0.00'}</p>
+              <p className="text-xs font-medium text-gray-600">Your Earnings</p>
+              <p className="text-xl font-bold text-purple-600">₹{filteredStats.totalEarnings?.toFixed(2) || '0.00'}</p>
             </div>
             <div className="text-purple-500 text-2xl">💎</div>
           </div>
         </div>
       </div>
 
-      {/* Recent Transactions */}
+      {/* Recent Transactions with Filter */}
       <div className="bg-white shadow rounded-lg">
         <div className="px-6 py-4 border-b border-gray-200">
-          <div className="flex justify-between items-center">
+          <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-medium text-gray-900">Recent Transactions</h3>
             <div className="flex space-x-2">
               <button 
@@ -558,15 +676,49 @@ return (
               >
                 🔄 Refresh
               </button>
-              <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm">
-                📥 Export CSV
+              <button 
+                onClick={exportFilteredCSV}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm transition-colors"
+              >
+                📥 Export CSV ({filteredStats.totalTransactions})
               </button>
             </div>
           </div>
+
+          {/* 🆕 NEW: Form Filter Dropdown */}
+          {uniqueFormNames.length > 0 && (
+            <div className="flex items-center space-x-3">
+              <label className="text-sm font-medium text-gray-700">Filter by Form:</label>
+              <select
+                value={selectedFormFilter}
+                onChange={(e) => setSelectedFormFilter(e.target.value)}
+                className="px-3 py-1 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="all">All Forms ({transactions.length})</option>
+                {uniqueFormNames.map((formName) => {
+                  const count = transactions.filter(t => 
+                    (t.formName || t.form_name || 'Unknown Form') === formName
+                  ).length;
+                  return (
+                    <option key={formName} value={formName}>
+                      📝 {formName} ({count})
+                    </option>
+                  );
+                })}
+              </select>
+              {selectedFormFilter !== 'all' && (
+                <button
+                  onClick={() => setSelectedFormFilter('all')}
+                  className="text-blue-600 hover:text-blue-800 text-sm underline"
+                >
+                  Clear Filter
+                </button>
+              )}
+            </div>
+          )}
         </div>
         
         <div className="overflow-x-auto">
-          {/* ✅ FIXED TABLE WITH FORM NAME COLUMN - No HTML Comments */}
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
@@ -579,7 +731,6 @@ return (
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Product
                 </th>
-                {/* ✅ NEW COLUMN: Form Name */}
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Form Name
                 </th>
@@ -598,8 +749,8 @@ return (
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {transactions && transactions.length > 0 ? (
-                transactions.map((transaction, index) => (
+              {filteredTransactions && filteredTransactions.length > 0 ? (
+                filteredTransactions.map((transaction, index) => (
                   <tr key={transaction.id || index} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
                       {transaction.transaction_id || transaction.cashfree_order_id || `#${transaction.id}`}
@@ -613,9 +764,12 @@ return (
                     <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
                       {transaction.product_name || 'Payment'}
                     </td>
-                    {/* ✅ NEW CELL: Form Name */}
                     <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
-                      <span className="inline-flex px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded-full">
+                      <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
+                        selectedFormFilter !== 'all' 
+                          ? 'bg-green-100 text-green-800' 
+                          : 'bg-blue-100 text-blue-800'
+                      }`}>
                         📝 {transaction.formName || transaction.form_name || 'Unknown Form'}
                       </span>
                     </td>
@@ -649,9 +803,21 @@ return (
               ) : (
                 <tr>
                   <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
-                    <div className="text-4xl mb-4">💳</div>
-                    <p className="text-lg font-medium">No transactions yet</p>
-                    <p className="text-sm">Your transactions will appear here once customers start paying</p>
+                    <div className="text-4xl mb-4">
+                      {selectedFormFilter === 'all' ? '💳' : '🔍'}
+                    </div>
+                    <p className="text-lg font-medium">
+                      {selectedFormFilter === 'all' 
+                        ? 'No transactions yet' 
+                        : `No transactions for "${selectedFormFilter}"`
+                      }
+                    </p>
+                    <p className="text-sm">
+                      {selectedFormFilter === 'all'
+                        ? 'Your transactions will appear here once customers start paying'
+                        : 'Try selecting a different form or "All Forms" to see more data'
+                      }
+                    </p>
                   </td>
                 </tr>
               )}
