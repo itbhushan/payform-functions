@@ -209,25 +209,29 @@ exports.handler = async (event, context) => {
     // Return payment link
     const paymentUrl = `https://payments.cashfree.com/forms/${cashfreeOrder.payment_session_id}`;
     
-    console.log('=== ORDER CREATION COMPLETED ===');
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({
-        success: true,
-        payment_url: paymentUrl,
-        order_id: cashfreeOrder.order_id,
-        amount: totalAmount,
-        split_enabled: splitEnabled,
-        commission_breakdown: {
-          total: totalAmount,
-          gateway_fee: gatewayFee,
-          platform_commission: platformCommission,
-          form_admin_earnings: formAdminAmount
-        }
-      })
-    };
+// 🆕 NEW: Generate order summary URL
+const orderSummaryUrl = `${process.env.NETLIFY_URL || 'https://payform2025.netlify.app'}/order/${cashfreeOrder.order_id}`;
 
+console.log('=== ORDER CREATION COMPLETED ===');
+return {
+  statusCode: 200,
+  headers,
+  body: JSON.stringify({
+    success: true,
+    payment_url: paymentUrl,
+    order_summary_url: orderSummaryUrl, // 🆕 NEW: Add summary URL
+    order_id: cashfreeOrder.order_id,
+    amount: totalAmount,
+    split_enabled: splitEnabled,
+    commission_breakdown: {
+      total: totalAmount,
+      gateway_fee: gatewayFee,
+      platform_commission: platformCommission,
+      form_admin_earnings: formAdminAmount
+    }
+  })
+};
+    
   } catch (error) {
     console.error('❌ Unexpected error:', error);
     return {
