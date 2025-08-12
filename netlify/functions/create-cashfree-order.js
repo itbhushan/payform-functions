@@ -233,6 +233,7 @@ return {
   body: JSON.stringify({
     success: true,
     payment_url: paymentUrl,
+    checkout_url: paymentUrl,  // ← ADD this line for Google Apps Script compatibility
     order_id: cashfreeOrder.order_id,
     amount: totalAmount,
     split_enabled: splitEnabled,
