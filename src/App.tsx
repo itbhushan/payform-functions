@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import type { ReactNode } from 'react';
 import { MyForms } from './components/dashboard/MyForms';
-import { OrderSummary } from './components/OrderSummary';
+//import { OrderSummary } from './components/OrderSummary';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 //import { RegisterPage } from './components/auth/RegisterPage';
 //import DebugDashboard from './components/DebugDashboard';
@@ -1142,7 +1142,7 @@ const AdminManagement: React.FC = () => {
   );
 };
 
-// Order Summary Route Component
+/*// Order Summary Route Component
 const OrderSummaryRoute: React.FC = () => {
   const urlParams = new URLSearchParams(window.location.search);
   const orderId = window.location.pathname.split('/').pop();
@@ -1183,7 +1183,7 @@ const AppRouter: React.FC = () => {
   }
 
   return user ? <Dashboard /> : <LoginPage />;
-};
+};*/
 
 // Main App Component
 const App: React.FC = () => {
@@ -1226,9 +1226,8 @@ const App: React.FC = () => {
 const PayFormApp: React.FC = () => {
   return (
     <AuthProvider>
-      <AppRouter />
+      <App />
     </AuthProvider>
   );
 };
-
 export default PayFormApp;
