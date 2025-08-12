@@ -123,7 +123,6 @@ exports.handler = async (event, context) => {
 
     // Create Cashfree order
     console.log('📡 Creating Cashfree order...');
-    //const response = await fetch('https://api.cashfree.com/pg/orders', {
     const response = await fetch('https://sandbox.cashfree.com/pg/orders', {
       method: 'POST',
       headers: {
@@ -222,9 +221,9 @@ console.log('🔍 DEBUG: Payment Session ID:', paymentSessionId);
 
 // Return payment link
 const paymentUrl = paymentSessionId ? 
-  `https://payments.cashfree.com/forms/${paymentSessionId}` : 
+  `https://payments-test.cashfree.com/links/${paymentSessionId}` : 
   null;
-
+    
 console.log('🔍 DEBUG: Generated Payment URL:', paymentUrl);
     
 console.log('=== ORDER CREATION COMPLETED ===');
