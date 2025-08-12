@@ -206,10 +206,6 @@ exports.handler = async (event, context) => {
       console.log('✅ Split transaction record created');
     }
 
-    // Return payment link
-    const paymentUrl = `https://payments.cashfree.com/forms/${cashfreeOrder.payment_session_id}`;
-    
-// 🆕 NEW: Generate order summary URL
 // Return payment link
 const paymentUrl = `https://payments.cashfree.com/forms/${cashfreeOrder.payment_session_id}`;
     
