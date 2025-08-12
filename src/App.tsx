@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import type { ReactNode } from 'react';
 import { MyForms } from './components/dashboard/MyForms';
+import { OrderSummary } from './components/OrderSummary';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 //import { RegisterPage } from './components/auth/RegisterPage';
 //import DebugDashboard from './components/DebugDashboard';
@@ -1141,6 +1142,49 @@ const AdminManagement: React.FC = () => {
   );
 };
 
+// Order Summary Route Component
+const OrderSummaryRoute: React.FC = () => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const orderId = window.location.pathname.split('/').pop();
+  
+  if (!orderId || !orderId.startsWith('PAYFORM_')) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-4xl mb-4">❌</div>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Invalid Order</h2>
+          <p className="text-gray-600">Order not found or invalid order ID.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <OrderSummary orderId={orderId} />;
+};
+
+// Router Component
+const AppRouter: React.FC = () => {
+  const { user, loading } = useAuth();
+  
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading PayForm...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Check if this is an order summary page
+  if (window.location.pathname.startsWith('/order/')) {
+    return <OrderSummaryRoute />;
+  }
+
+  return user ? <Dashboard /> : <LoginPage />;
+};
+
 // Main App Component
 const App: React.FC = () => {
   const { user, loading } = useAuth();
@@ -1182,7 +1226,7 @@ const App: React.FC = () => {
 const PayFormApp: React.FC = () => {
   return (
     <AuthProvider>
-      <App />
+      <AppRouter />
     </AuthProvider>
   );
 };
