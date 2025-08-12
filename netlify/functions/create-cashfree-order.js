@@ -209,7 +209,23 @@ exports.handler = async (event, context) => {
     }
 
 // Return payment link
-const paymentUrl = `https://payments.cashfree.com/forms/${cashfreeOrder.payment_session_id}`;
+// Debug: Log the Cashfree response to see the structure
+console.log('🔍 DEBUG: Full Cashfree Order Response:', JSON.stringify(cashfreeOrder, null, 2));
+
+// Check what field contains the payment session ID
+const paymentSessionId = cashfreeOrder.payment_session_id || 
+                         cashfreeOrder.session_id || 
+                         cashfreeOrder.cf_order_id ||
+                         cashfreeOrder.order_token;
+
+console.log('🔍 DEBUG: Payment Session ID:', paymentSessionId);
+
+// Return payment link
+const paymentUrl = paymentSessionId ? 
+  `https://payments.cashfree.com/forms/${paymentSessionId}` : 
+  null;
+
+console.log('🔍 DEBUG: Generated Payment URL:', paymentUrl);
     
 console.log('=== ORDER CREATION COMPLETED ===');
 return {
