@@ -123,12 +123,14 @@ exports.handler = async (event, context) => {
 
     // Create Cashfree order
     console.log('📡 Creating Cashfree order...');
-    const response = await fetch('https://api.cashfree.com/pg/orders', {
+    //const response = await fetch('https://api.cashfree.com/pg/orders', {
+    const response = await fetch('https://sandbox.cashfree.com/pg/orders', {
       method: 'POST',
       headers: {
         'accept': 'application/json',
         'content-type': 'application/json',
-        'x-api-version': '2023-08-01',
+        //'x-api-version': '2023-08-01',
+        'x-api-version': '2022-09-01',
         'x-client-id': process.env.CASHFREE_APP_ID,
         'x-client-secret': process.env.CASHFREE_SECRET_KEY
       },
