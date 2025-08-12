@@ -210,8 +210,9 @@ exports.handler = async (event, context) => {
     const paymentUrl = `https://payments.cashfree.com/forms/${cashfreeOrder.payment_session_id}`;
     
 // 🆕 NEW: Generate order summary URL
-const orderSummaryUrl = `${process.env.NETLIFY_URL || 'https://payform2025.netlify.app'}/order/${cashfreeOrder.order_id}`;
-
+// Return payment link
+const paymentUrl = `https://payments.cashfree.com/forms/${cashfreeOrder.payment_session_id}`;
+    
 console.log('=== ORDER CREATION COMPLETED ===');
 return {
   statusCode: 200,
@@ -219,7 +220,6 @@ return {
   body: JSON.stringify({
     success: true,
     payment_url: paymentUrl,
-    order_summary_url: orderSummaryUrl, // 🆕 NEW: Add summary URL
     order_id: cashfreeOrder.order_id,
     amount: totalAmount,
     split_enabled: splitEnabled,
