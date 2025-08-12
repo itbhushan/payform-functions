@@ -90,7 +90,7 @@ exports.handler = async (event, context) => {
       order_amount: totalAmount,
       order_currency: 'INR',
       customer_details: {
-        customer_id: email,
+        customer_id: email.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50),
         customer_email: email,
         customer_name: customer_name || 'Customer',
         customer_phone: '+919999999999' // Temporary - will be enhanced later
