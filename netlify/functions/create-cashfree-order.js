@@ -1,4 +1,4 @@
-// netlify/functions/create-cashfree-order.js - ENHANCED VERSION (Backward Compatible)
+// netlify/functions/create-cashfree-order.js - ENHANCED VERSION (Fixed Payment Session ID)
 const { createClient } = require('@supabase/supabase-js');
 
 exports.handler = async (event, context) => {
@@ -128,7 +128,6 @@ exports.handler = async (event, context) => {
       headers: {
         'accept': 'application/json',
         'content-type': 'application/json',
-        //'x-api-version': '2023-08-01',
         'x-api-version': '2022-09-01',
         'x-client-id': process.env.CASHFREE_APP_ID,
         'x-client-secret': process.env.CASHFREE_SECRET_KEY
@@ -148,6 +147,11 @@ exports.handler = async (event, context) => {
 
     const cashfreeOrder = await response.json();
     console.log('✅ Cashfree order created:', cashfreeOrder.order_id);
+
+    // 🔍 DEBUG: Log the raw Cashfree response to identify corruption source
+    console.log('🔍 RAW payment_session_id from Cashfree:', cashfreeOrder.payment_session_id);
+    console.log('🔍 RAW payment_session_id length:', cashfreeOrder.payment_session_id?.length);
+    console.log('🔍 RAW payment_session_id ends with:', cashfreeOrder.payment_session_id?.slice(-20));
 
     // Save transaction to database with enhanced fields
     const transactionData = {
@@ -207,44 +211,66 @@ exports.handler = async (event, context) => {
       console.log('✅ Split transaction record created');
     }
 
-// Return payment link
-// Debug: Log the Cashfree response to see the structure
-console.log('🔍 DEBUG: Full Cashfree Order Response:', JSON.stringify(cashfreeOrder, null, 2));
+    // 🔧 ENHANCED PAYMENT SESSION ID PROCESSING
+    let paymentSessionId = cashfreeOrder.payment_session_id || 
+                          cashfreeOrder.session_id || 
+                          cashfreeOrder.cf_order_id ||
+                          cashfreeOrder.order_token;
 
-// Check what field contains the payment session ID
-const paymentSessionId = cashfreeOrder.payment_session_id || 
-                         cashfreeOrder.session_id || 
-                         cashfreeOrder.cf_order_id ||
-                         cashfreeOrder.order_token;
+    console.log('🔍 Original Payment Session ID:', paymentSessionId);
 
-console.log('🔍 DEBUG: Payment Session ID:', paymentSessionId);
-
-// Return payment link
-const paymentUrl = paymentSessionId ? 
-  `https://payments-test.cashfree.com/links/${paymentSessionId}` : 
-  null;
-    
-console.log('🔍 DEBUG: Generated Payment URL:', paymentUrl);
-    
-console.log('=== ORDER CREATION COMPLETED ===');
-return {
-  statusCode: 200,
-  headers,
-  body: JSON.stringify({
-    success: true,
-    payment_url: paymentUrl,
-    checkout_url: paymentUrl,  // ← ADD this line for Google Apps Script compatibility
-    order_id: cashfreeOrder.order_id,
-    amount: totalAmount,
-    split_enabled: splitEnabled,
-    commission_breakdown: {
-      total: totalAmount,
-      gateway_fee: gatewayFee,
-      platform_commission: platformCommission,
-      form_admin_earnings: formAdminAmount
+    // 🆕 ROBUST SESSION ID CLEANING
+    if (paymentSessionId) {
+      // Remove any trailing "payment" text variations (case insensitive)
+      paymentSessionId = paymentSessionId.replace(/payment+$/gi, '');
+      
+      // Remove specific corrupted patterns
+      paymentSessionId = paymentSessionId.replace(/(paymentpayment|payment)$/gi, '');
+      
+      // Remove any trailing underscores or special characters that might be left
+      paymentSessionId = paymentSessionId.replace(/[_\-\s]+$/g, '');
+      
+      // Trim any whitespace
+      paymentSessionId = paymentSessionId.trim();
+      
+      console.log('🔧 Cleaned Payment Session ID:', paymentSessionId);
+      console.log('🔧 Cleaned Session ID length:', paymentSessionId.length);
     }
-  })
-};
+
+    // Generate the payment URL
+    const paymentUrl = paymentSessionId ? 
+      `https://payments-test.cashfree.com/links/${paymentSessionId}` : 
+      null;
+    
+    console.log('🔍 Generated Payment URL:', paymentUrl);
+    
+    // Verify the URL doesn't contain corruption
+    if (paymentUrl && paymentUrl.includes('payment')) {
+      console.error('⚠️ WARNING: Payment URL still contains "payment" - manual cleaning required');
+      // Log for debugging
+      console.error('🔍 Problematic URL:', paymentUrl);
+    }
+    
+    console.log('=== ORDER CREATION COMPLETED ===');
+    
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        success: true,
+        payment_url: paymentUrl,
+        checkout_url: paymentUrl,  // For Google Apps Script compatibility
+        order_id: cashfreeOrder.order_id,
+        amount: totalAmount,
+        split_enabled: splitEnabled,
+        commission_breakdown: {
+          total: totalAmount,
+          gateway_fee: gatewayFee,
+          platform_commission: platformCommission,
+          form_admin_earnings: formAdminAmount
+        }
+      })
+    };
     
   } catch (error) {
     console.error('❌ Unexpected error:', error);
