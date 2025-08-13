@@ -211,45 +211,51 @@ exports.handler = async (event, context) => {
       console.log('✅ Split transaction record created');
     }
 
-    // 🔧 ENHANCED PAYMENT SESSION ID PROCESSING
-    let paymentSessionId = cashfreeOrder.payment_session_id || 
-                          cashfreeOrder.session_id || 
-                          cashfreeOrder.cf_order_id ||
-                          cashfreeOrder.order_token;
-
-    console.log('🔍 Original Payment Session ID:', paymentSessionId);
-
-    // 🆕 ROBUST SESSION ID CLEANING
-    if (paymentSessionId) {
-      // Remove any trailing "payment" text variations (case insensitive)
-      paymentSessionId = paymentSessionId.replace(/payment+$/gi, '');
-      
-      // Remove specific corrupted patterns
-      paymentSessionId = paymentSessionId.replace(/(paymentpayment|payment)$/gi, '');
-      
-      // Remove any trailing underscores or special characters that might be left
-      paymentSessionId = paymentSessionId.replace(/[_\-\s]+$/g, '');
-      
-      // Trim any whitespace
-      paymentSessionId = paymentSessionId.trim();
-      
-      console.log('🔧 Cleaned Payment Session ID:', paymentSessionId);
-      console.log('🔧 Cleaned Session ID length:', paymentSessionId.length);
-    }
-
-    // Generate the payment URL
-    const paymentUrl = paymentSessionId ? 
-      `https://payments-test.cashfree.com/links/${paymentSessionId}` : 
-      null;
+    // 🔧 ENHANCED PAYMENT URL PROCESSING
+    console.log('🔍 DEBUG: Full Cashfree Order Response:', JSON.stringify(cashfreeOrder, null, 2));
     
-    console.log('🔍 Generated Payment URL:', paymentUrl);
+    // 🆕 NEW APPROACH: Look for direct payment URLs first
+    let paymentUrl = null;
     
-    // Verify the URL doesn't contain corruption
-    if (paymentUrl && paymentUrl.includes('payment')) {
-      console.error('⚠️ WARNING: Payment URL still contains "payment" - manual cleaning required');
-      // Log for debugging
-      console.error('🔍 Problematic URL:', paymentUrl);
+    // Check for direct payment URL fields (Cashfree may provide these)
+    if (cashfreeOrder.payment_link) {
+      paymentUrl = cashfreeOrder.payment_link;
+      console.log('✅ Found direct payment_link:', paymentUrl);
+    } else if (cashfreeOrder.checkout_url) {
+      paymentUrl = cashfreeOrder.checkout_url;
+      console.log('✅ Found checkout_url:', paymentUrl);
+    } else if (cashfreeOrder.payment_url) {
+      paymentUrl = cashfreeOrder.payment_url;
+      console.log('✅ Found payment_url:', paymentUrl);
+    } else {
+      // Fallback: Try to construct URL with payment_session_id
+      let paymentSessionId = cashfreeOrder.payment_session_id || 
+                            cashfreeOrder.session_id || 
+                            cashfreeOrder.cf_order_id ||
+                            cashfreeOrder.order_token;
+
+      console.log('🔍 Using payment_session_id fallback:', paymentSessionId);
+
+      if (paymentSessionId) {
+        // Clean the session ID
+        paymentSessionId = paymentSessionId.replace(/payment+$/gi, '').trim();
+        console.log('🔧 Cleaned Payment Session ID:', paymentSessionId);
+        
+        // Try different URL formats that Cashfree might use
+        const possibleUrls = [
+          `https://payments-test.cashfree.com/links/${paymentSessionId}`,
+          `https://payments.cashfree.com/forms/${paymentSessionId}`,
+          `https://payments-test.cashfree.com/forms/${paymentSessionId}`
+        ];
+        
+        // Use the first format as default (can be changed based on testing)
+        paymentUrl = possibleUrls[0];
+        console.log('🔗 Constructed payment URL:', paymentUrl);
+        console.log('🔗 Alternative URLs to try:', possibleUrls);
+      }
     }
+    
+    console.log('🎯 Final Payment URL:', paymentUrl);
     
     console.log('=== ORDER CREATION COMPLETED ===');
     
