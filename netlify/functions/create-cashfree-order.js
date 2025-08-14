@@ -273,8 +273,7 @@ possibleUrlFields.forEach(field => {
     }
 
     // ✅ REVERTED: Use working payment URL format
-    const paymentUrl = `https://payments-test.cashfree.com/forms/${cashfreeOrder.payment_session_id}`;
-    
+      
     console.log('✅ Generated Payment URL:', paymentUrl);
     console.log('=== ORDER CREATION COMPLETED ===');
 
