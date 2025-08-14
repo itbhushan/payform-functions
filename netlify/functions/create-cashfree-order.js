@@ -1,12 +1,11 @@
-// netlify/functions/create-cashfree-order.js - ENHANCED VERSION (Fixed Payment Session ID)
+// netlify/functions/create-cashfree-order.js - FIXED VERSION (Reverted to Working Config)
 const { createClient } = require('@supabase/supabase-js');
 
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Content-Type': 'application/json'
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
   };
 
   if (event.httpMethod === 'OPTIONS') {
@@ -27,13 +26,13 @@ exports.handler = async (event, context) => {
       };
     }
 
+    console.log(`📝 Processing order for form: ${form_id}, amount: ₹${product_price}`);
+
     // Initialize Supabase
     const supabase = createClient(
       process.env.SUPABASE_URL,
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
-
-    console.log(`📝 Processing order for form: ${form_id}, amount: ₹${product_price}`);
 
     // Get form admin details and check if split payments are enabled
     const { data: formData, error: formError } = await supabase
@@ -81,19 +80,23 @@ exports.handler = async (event, context) => {
       Platform Commission: ₹${platformCommission.toFixed(2)}
       Form Admin: ₹${formAdminAmount.toFixed(2)}`);
 
+    if (!splitEnabled) {
+      console.log('⚠️ Split payments disabled - using traditional flow');
+    }
+
     // Generate unique order ID
     const orderId = `PAYFORM_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    // Prepare Cashfree order payload
+    // Prepare Cashfree order payload - REVERTED TO WORKING FORMAT
     let orderPayload = {
       order_id: orderId,
       order_amount: totalAmount,
       order_currency: 'INR',
       customer_details: {
-        customer_id: email.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50),
-        customer_email: email,
+        customer_id: email, // ✅ REVERTED: Simple email format (no cleaning)
         customer_name: customer_name || 'Customer',
-        customer_phone: '+919999999999' // Temporary - will be enhanced later
+        customer_email: email,
+        customer_phone: '+919999999999'
       },
       order_meta: {
         return_url: `${process.env.NETLIFY_URL || 'https://payform2025.netlify.app'}/.netlify/functions/verify-cashfree-payment?order_id=${orderId}`,
@@ -101,36 +104,33 @@ exports.handler = async (event, context) => {
       }
     };
 
-    // 🆕 ADD SPLIT PAYMENTS IF ENABLED
+    // ADD SPLIT PAYMENTS IF ENABLED
     if (splitEnabled) {
       console.log('✅ Adding split payments to order');
       orderPayload.order_splits = [
         {
           vendor_id: process.env.CASHFREE_SUPER_ADMIN_VENDOR_ID || 'SUPER_ADMIN',
-          amount: Math.round(platformCommission * 100) / 100, // Platform commission
+          amount: Math.round(platformCommission * 100) / 100,
           percentage: null
         },
         {
           vendor_id: formAdmin.cashfree_vendor_id,
-          amount: Math.round(formAdminAmount * 100) / 100, // Form admin earnings
+          amount: Math.round(formAdminAmount * 100) / 100,
           percentage: null
         }
       ];
       console.log('🔄 Split configuration:', JSON.stringify(orderPayload.order_splits));
-    } else {
-      console.log('⚠️ Split payments disabled - using traditional flow');
     }
 
-    // Create Cashfree order
+    // Create Cashfree order - REVERTED TO WORKING ENDPOINT
     console.log('📡 Creating Cashfree order...');
-    const response = await fetch('https://sandbox.cashfree.com/pg/orders', {
+    const response = await fetch('https://api.cashfree.com/pg/orders', { // ✅ REVERTED: Production API
       method: 'POST',
       headers: {
-        'accept': 'application/json',
-        'content-type': 'application/json',
-        'x-api-version': '2022-09-01',
         'x-client-id': process.env.CASHFREE_APP_ID,
-        'x-client-secret': process.env.CASHFREE_SECRET_KEY
+        'x-client-secret': process.env.CASHFREE_SECRET_KEY,
+        'x-api-version': '2023-08-01',
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(orderPayload)
     });
@@ -148,12 +148,7 @@ exports.handler = async (event, context) => {
     const cashfreeOrder = await response.json();
     console.log('✅ Cashfree order created:', cashfreeOrder.order_id);
 
-    // 🔍 DEBUG: Log the raw Cashfree response to identify corruption source
-    console.log('🔍 RAW payment_session_id from Cashfree:', cashfreeOrder.payment_session_id);
-    console.log('🔍 RAW payment_session_id length:', cashfreeOrder.payment_session_id?.length);
-    console.log('🔍 RAW payment_session_id ends with:', cashfreeOrder.payment_session_id?.slice(-20));
-
-    // Save transaction to database with enhanced fields
+    // Save transaction to database
     const transactionData = {
       form_id,
       email,
@@ -170,7 +165,6 @@ exports.handler = async (event, context) => {
       gateway_fee: gatewayFee,
       platform_commission: platformCommission,
       net_amount_to_admin: formAdminAmount,
-      // 🆕 NEW SPLIT PAYMENT FIELDS
       split_enabled: splitEnabled,
       cashfree_vendor_id: splitEnabled ? formAdmin.cashfree_vendor_id : null,
       split_status: splitEnabled ? 'pending' : 'disabled',
@@ -194,7 +188,7 @@ exports.handler = async (event, context) => {
 
     console.log('✅ Transaction saved with ID:', transaction.id);
 
-    // 🆕 CREATE SPLIT TRANSACTION RECORD IF ENABLED
+    // CREATE SPLIT TRANSACTION RECORD IF ENABLED
     if (splitEnabled) {
       const splitData = {
         transaction_id: transaction.id,
@@ -211,61 +205,19 @@ exports.handler = async (event, context) => {
       console.log('✅ Split transaction record created');
     }
 
-    // 🔧 ENHANCED PAYMENT URL PROCESSING
-    console.log('🔍 DEBUG: Full Cashfree Order Response:', JSON.stringify(cashfreeOrder, null, 2));
+    // ✅ REVERTED: Use working payment URL format
+    const paymentUrl = `https://payments.cashfree.com/forms/${cashfreeOrder.payment_session_id}`;
     
-    // 🆕 NEW APPROACH: Look for direct payment URLs first
-    let paymentUrl = null;
-    
-    // Check for direct payment URL fields (Cashfree may provide these)
-    if (cashfreeOrder.payment_link) {
-      paymentUrl = cashfreeOrder.payment_link;
-      console.log('✅ Found direct payment_link:', paymentUrl);
-    } else if (cashfreeOrder.checkout_url) {
-      paymentUrl = cashfreeOrder.checkout_url;
-      console.log('✅ Found checkout_url:', paymentUrl);
-    } else if (cashfreeOrder.payment_url) {
-      paymentUrl = cashfreeOrder.payment_url;
-      console.log('✅ Found payment_url:', paymentUrl);
-    } else {
-      // Fallback: Try to construct URL with payment_session_id
-      let paymentSessionId = cashfreeOrder.payment_session_id || 
-                            cashfreeOrder.session_id || 
-                            cashfreeOrder.cf_order_id ||
-                            cashfreeOrder.order_token;
-
-      console.log('🔍 Using payment_session_id fallback:', paymentSessionId);
-
-      if (paymentSessionId) {
-        // Clean the session ID
-        paymentSessionId = paymentSessionId.replace(/payment+$/gi, '').trim();
-        console.log('🔧 Cleaned Payment Session ID:', paymentSessionId);
-        
-        // Try different URL formats that Cashfree might use
-        const possibleUrls = [
-          `https://payments-test.cashfree.com/links/${paymentSessionId}`,
-          `https://payments.cashfree.com/forms/${paymentSessionId}`,
-          `https://payments-test.cashfree.com/forms/${paymentSessionId}`
-        ];
-        
-        // Use the first format as default (can be changed based on testing)
-        paymentUrl = possibleUrls[0];
-        console.log('🔗 Constructed payment URL:', paymentUrl);
-        console.log('🔗 Alternative URLs to try:', possibleUrls);
-      }
-    }
-    
-    console.log('🎯 Final Payment URL:', paymentUrl);
-    
+    console.log('✅ Generated Payment URL:', paymentUrl);
     console.log('=== ORDER CREATION COMPLETED ===');
-    
+
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: true,
         payment_url: paymentUrl,
-        checkout_url: paymentUrl,  // For Google Apps Script compatibility
+        checkout_url: paymentUrl, // ✅ ADDED: For Google Apps Script compatibility
         order_id: cashfreeOrder.order_id,
         amount: totalAmount,
         split_enabled: splitEnabled,
@@ -277,7 +229,7 @@ exports.handler = async (event, context) => {
         }
       })
     };
-    
+
   } catch (error) {
     console.error('❌ Unexpected error:', error);
     return {
