@@ -148,6 +148,27 @@ exports.handler = async (event, context) => {
     const cashfreeOrder = await response.json();
     console.log('✅ Cashfree order created:', cashfreeOrder.order_id);
 
+    // Right after: const cashfreeOrder = await response.json();
+console.log('🔍 === COMPLETE CASHFREE RESPONSE DEBUG ===');
+console.log('Full Response:', JSON.stringify(cashfreeOrder, null, 2));
+
+// Look for all possible URL fields
+const possibleUrlFields = [
+  'payment_link',
+  'hosted_checkout_url', 
+  'checkout_url',
+  'payment_url',
+  'link_url',
+  'redirect_url'
+];
+
+console.log('🔗 Checking for direct payment URLs:');
+possibleUrlFields.forEach(field => {
+  if (cashfreeOrder[field]) {
+    console.log(`✅ Found ${field}:`, cashfreeOrder[field]);
+  }
+});
+
     // Save transaction to database
     const transactionData = {
       form_id,
