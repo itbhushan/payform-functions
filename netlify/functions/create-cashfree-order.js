@@ -93,7 +93,7 @@ exports.handler = async (event, context) => {
       order_amount: totalAmount,
       order_currency: 'INR',
       customer_details: {
-        customer_id: email, // ✅ REVERTED: Simple email format (no cleaning)
+        customer_id: email.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50), // ✅ Clean for Cashfree
         customer_name: customer_name || 'Customer',
         customer_email: email,
         customer_phone: '+919999999999'
