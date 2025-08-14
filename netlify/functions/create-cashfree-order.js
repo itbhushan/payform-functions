@@ -148,6 +148,52 @@ exports.handler = async (event, context) => {
     const cashfreeOrder = await response.json();
     console.log('✅ Cashfree order created:', cashfreeOrder.order_id);
 
+    // Step 2: Create Payment Session to get actual checkout URL
+console.log('🔗 Creating payment session...');
+
+const sessionPayload = {
+  payment_session_id: cashfreeOrder.payment_session_id.replace(/payment+$/gi, ''), // Clean the session ID
+  payment_methods: {}
+};
+
+const sessionResponse = await fetch(`https://sandbox.cashfree.com/pg/orders/${cashfreeOrder.order_id}/pay`, {
+  method: 'POST',
+  headers: {
+    'x-client-id': process.env.CASHFREE_APP_ID,
+    'x-client-secret': process.env.CASHFREE_SECRET_KEY,
+    'x-api-version': '2023-08-01',
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify(sessionPayload)
+});
+
+let paymentUrl = null;
+
+if (sessionResponse.ok) {
+  const sessionData = await sessionResponse.json();
+  console.log('✅ Payment session created:', JSON.stringify(sessionData, null, 2));
+  
+  // Look for the actual payment URL in session response
+  paymentUrl = sessionData.payment_link || 
+               sessionData.checkout_url || 
+               sessionData.hosted_checkout_url ||
+               sessionData.redirect_url;
+               
+  if (paymentUrl) {
+    console.log('✅ Found actual payment URL:', paymentUrl);
+  }
+} else {
+  const errorText = await sessionResponse.text();
+  console.log('⚠️ Payment session creation failed:', errorText);
+}
+
+// Fallback: Use order-based checkout URL if session fails
+if (!paymentUrl) {
+  paymentUrl = `https://sandbox.cashfree.com/pg/view/order/${cashfreeOrder.order_id}`;
+  console.log('🔄 Using fallback order URL:', paymentUrl);
+}
+    
+
     // Right after: const cashfreeOrder = await response.json();
 console.log('🔍 === COMPLETE CASHFREE RESPONSE DEBUG ===');
 console.log('Full Response:', JSON.stringify(cashfreeOrder, null, 2));
