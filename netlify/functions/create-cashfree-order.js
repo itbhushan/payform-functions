@@ -124,7 +124,7 @@ exports.handler = async (event, context) => {
 
     // Create Cashfree order - REVERTED TO WORKING ENDPOINT
     console.log('📡 Creating Cashfree order...');
-    const response = await fetch('https://api.cashfree.com/pg/orders', { // ✅ REVERTED: Production API
+    const response = await fetch('https://sandbox.cashfree.com/pg/orders', {
       method: 'POST',
       headers: {
         'x-client-id': process.env.CASHFREE_APP_ID,
@@ -206,7 +206,7 @@ exports.handler = async (event, context) => {
     }
 
     // ✅ REVERTED: Use working payment URL format
-    const paymentUrl = `https://payments.cashfree.com/forms/${cashfreeOrder.payment_session_id}`;
+    const paymentUrl = `https://payments-test.cashfree.com/forms/${cashfreeOrder.payment_session_id}`;
     
     console.log('✅ Generated Payment URL:', paymentUrl);
     console.log('=== ORDER CREATION COMPLETED ===');
