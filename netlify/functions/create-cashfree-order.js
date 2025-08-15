@@ -152,14 +152,18 @@ exports.handler = async (event, context) => {
 console.log('🔗 Generating payment page...');
 
 // Clean the session ID first
+// Clean the session ID by removing everything after the last valid character
 let cleanSessionId = cashfreeOrder.payment_session_id;
-if (cleanSessionId && cleanSessionId.includes('payment')) {
-  // Enhanced cleaning - remove any trailing "payment" text more aggressively
-cleanSessionId = cleanSessionId.replace(/payment+$/gi, '').replace(/paymentpayment$/gi, '');
-console.log('🔧 Original session ID length:', cashfreeOrder.payment_session_id.length);
-console.log('🔧 Cleaned session ID length:', cleanSessionId.length);
+if (cleanSessionId) {
+  // Find the position of "payment" and cut everything from there
+  const paymentIndex = cleanSessionId.indexOf('payment');
+  if (paymentIndex !== -1) {
+    cleanSessionId = cleanSessionId.substring(0, paymentIndex);
+  }
+  console.log('🔧 Original session ID:', cashfreeOrder.payment_session_id);
   console.log('🔧 Cleaned session ID:', cleanSessionId);
 }
+    
 
 // Create payment page URL that will serve HTML with Cashfree SDK
 const paymentPageId = `payment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
