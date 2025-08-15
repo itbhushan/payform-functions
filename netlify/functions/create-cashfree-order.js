@@ -1,11 +1,11 @@
-// netlify/functions/create-cashfree-order.js - FIXED VERSION (Reverted to Working Config)
 const { createClient } = require('@supabase/supabase-js');
 
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Content-Type': 'application/json'
   };
 
   if (event.httpMethod === 'OPTIONS') {
@@ -13,274 +13,349 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    console.log('=== ENHANCED CASHFREE ORDER CREATION STARTED ===');
-    
-    const { form_id, email, product_name, product_price, customer_name } = JSON.parse(event.body);
-    
-    // Input validation
-    if (!form_id || !email || !product_price) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ error: 'Missing required parameters' })
-      };
-    }
+    // ✅ Extract all required parameters from request body
+    const { 
+      form_id, 
+      email, 
+      product_name, 
+      product_price, 
+      customer_name = "Customer", 
+      customer_phone = "9999999999",
+      form_admin_id
+    } = JSON.parse(event.body || '{}');
 
-    console.log(`📝 Processing order for form: ${form_id}, amount: ₹${product_price}`);
+    console.log('📥 Request received:', {
+      form_id,
+      email,
+      product_name,
+      product_price,
+      form_admin_id: form_admin_id || 'NOT PROVIDED'
+    });
 
-    // Initialize Supabase
-    const supabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY
-    );
+    // Validate required environment variables
+    const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
+    const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
 
-    // Get form admin details and check if split payments are enabled
-    const { data: formData, error: formError } = await supabase
-      .from('form_configs')
-      .select(`
-        *,
-        form_admins!inner(
-          id,
-          email,
-          name,
-          cashfree_vendor_id,
-          payout_enabled
-        )
-      `)
-      .eq('form_id', form_id)
-      .single();
-
-    if (formError || !formData) {
-      console.error('Form not found:', formError);
-      return {
-        statusCode: 404,
-        headers,
-        body: JSON.stringify({ error: 'Form configuration not found' })
-      };
-    }
-
-    const formAdmin = formData.form_admins;
-    const splitEnabled = formAdmin.payout_enabled && formAdmin.cashfree_vendor_id;
-    
-    console.log(`👤 Form Admin: ${formAdmin.email}, Split Enabled: ${splitEnabled}`);
-
-    // Calculate commission splits
-    const totalAmount = parseFloat(product_price);
-    const gatewayFeeRate = 0.025; // 2.5%
-    const fixedGatewayFee = 3;
-    const platformCommissionRate = 0.03; // 3%
-
-    const gatewayFee = (totalAmount * gatewayFeeRate) + fixedGatewayFee;
-    const platformCommission = totalAmount * platformCommissionRate;
-    const formAdminAmount = totalAmount - gatewayFee - platformCommission;
-
-    console.log(`💰 Split calculation:
-      Total: ₹${totalAmount}
-      Gateway Fee: ₹${gatewayFee.toFixed(2)}
-      Platform Commission: ₹${platformCommission.toFixed(2)}
-      Form Admin: ₹${formAdminAmount.toFixed(2)}`);
-
-    if (!splitEnabled) {
-      console.log('⚠️ Split payments disabled - using traditional flow');
+    if (!CASHFREE_APP_ID || !CASHFREE_SECRET_KEY) {
+      throw new Error('Cashfree credentials not configured');
     }
 
     // Generate unique order ID
-    const orderId = `PAYFORM_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const orderId = `payform_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    // Prepare Cashfree order payload - REVERTED TO WORKING FORMAT
-    let orderPayload = {
+    // ✅ Create orderDetails object early for consistent usage
+    const orderDetails = {
+      form_id, 
+      email, 
+      product_name, 
+      product_price, 
+      customer_name, 
+      customer_phone, 
+      form_admin_id
+    };
+
+    // Step 1: Create Cashfree Order
+    const orderData = {
       order_id: orderId,
-      order_amount: totalAmount,
-      order_currency: 'INR',
+      order_amount: parseFloat(product_price),
+      order_currency: "INR",
       customer_details: {
-        customer_id: email.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50), // ✅ Clean for Cashfree
-        customer_name: customer_name || 'Customer',
+        customer_id: email.replace('@', '_').replace('.', '_'),
+        customer_name: customer_name,
         customer_email: email,
-        customer_phone: '+919999999999'
+        customer_phone: customer_phone
       },
       order_meta: {
-        return_url: `${process.env.NETLIFY_URL || 'https://payform2025.netlify.app'}/.netlify/functions/verify-cashfree-payment?order_id=${orderId}`,
-        notify_url: `${process.env.NETLIFY_URL || 'https://payform2025.netlify.app'}/.netlify/functions/cashfree-webhook`,
-        payment_methods: null  // ✅ Add this field
+        return_url: `https://payform2025.netlify.app/.netlify/functions/verify-cashfree-payment?order_id=${orderId}&form_id=${form_id}&email=${encodeURIComponent(email)}`
       }
     };
 
-    // ADD SPLIT PAYMENTS IF ENABLED
-    if (splitEnabled) {
-      console.log('✅ Adding split payments to order');
-      orderPayload.order_splits = [
-        {
-          vendor_id: process.env.CASHFREE_SUPER_ADMIN_VENDOR_ID || 'SUPER_ADMIN',
-          amount: Math.round(platformCommission * 100) / 100,
-          percentage: null
-        },
-        {
-          vendor_id: formAdmin.cashfree_vendor_id,
-          amount: Math.round(formAdminAmount * 100) / 100,
-          percentage: null
-        }
-      ];
-      console.log('🔄 Split configuration:', JSON.stringify(orderPayload.order_splits));
-    }
-
-    // Create Cashfree order - REVERTED TO WORKING ENDPOINT
-    console.log('📡 Creating Cashfree order...');
-    const response = await fetch('https://sandbox.cashfree.com/pg/orders', {
+    const orderResponse = await fetch('https://sandbox.cashfree.com/pg/orders', {
       method: 'POST',
       headers: {
-        'x-client-id': process.env.CASHFREE_APP_ID,
-        'x-client-secret': process.env.CASHFREE_SECRET_KEY,
-        'x-api-version': '2025-01-01',  // ✅ Update to latest API version
+        'x-client-id': CASHFREE_APP_ID,
+        'x-client-secret': CASHFREE_SECRET_KEY,
+        'x-api-version': '2023-08-01',
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(orderPayload)
+      body: JSON.stringify(orderData)
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ Cashfree API Error:', response.status, errorText);
-      return {
-        statusCode: 500,
-        headers,
-        body: JSON.stringify({ error: 'Failed to create payment order', details: errorText })
-      };
+    if (!orderResponse.ok) {
+      const errorText = await orderResponse.text();
+      throw new Error(`Cashfree order creation failed: ${errorText}`);
     }
 
-    const cashfreeOrder = await response.json();
-    console.log('✅ Cashfree order created:', cashfreeOrder.order_id);
+    const cashfreeOrder = await orderResponse.json();
+    console.log('✅ Order created:', cashfreeOrder.cf_order_id);
 
-// Generate payment page URL using Cashfree JavaScript SDK approach
-console.log('🔗 Generating payment page...');
-
-// Clean the session ID first
-// Clean the session ID by removing everything after the last valid character
-let cleanSessionId = cashfreeOrder.payment_session_id;
-if (cleanSessionId) {
-  // Find the position of "payment" and cut everything from there
-  const paymentIndex = cleanSessionId.indexOf('payment');
-  if (paymentIndex !== -1) {
-    cleanSessionId = cleanSessionId.substring(0, paymentIndex);
-  }
-  console.log('🔧 Original session ID:', cashfreeOrder.payment_session_id);
-  console.log('🔧 Cleaned session ID:', cleanSessionId);
-}
-    
-
-// Create payment page URL that will serve HTML with Cashfree SDK
-const paymentPageId = `payment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-const paymentUrl = `${process.env.NETLIFY_URL || 'https://payform2025.netlify.app'}/.netlify/functions/payment-page?id=${paymentPageId}&session=${encodeURIComponent(cleanSessionId)}&amount=${totalAmount}&product=${encodeURIComponent(product_name || 'Product')}&order=${cashfreeOrder.order_id}`;
-
-console.log('✅ Generated payment page URL:', paymentUrl);
-console.log('🔧 Using cleaned session ID:', cleanSessionId);
-    
-    // Right after: const cashfreeOrder = await response.json();
-console.log('🔍 === COMPLETE CASHFREE RESPONSE DEBUG ===');
-console.log('Full Response:', JSON.stringify(cashfreeOrder, null, 2));
-
-// Look for all possible URL fields
-const possibleUrlFields = [
-  'payment_link',
-  'hosted_checkout_url', 
-  'checkout_url',
-  'payment_url',
-  'link_url',
-  'redirect_url'
-];
-
-console.log('🔗 Checking for direct payment URLs:');
-possibleUrlFields.forEach(field => {
-  if (cashfreeOrder[field]) {
-    console.log(`✅ Found ${field}:`, cashfreeOrder[field]);
-  }
-});
-
-    // Save transaction to database
-    const transactionData = {
-      form_id,
-      email,
-      customer_name: customer_name || 'Customer',
-      product_name: product_name || 'Product',
-      product_price: totalAmount,
-      payment_amount: totalAmount,
-      payment_currency: 'INR',
-      payment_provider: 'cashfree',
-      payment_status: 'pending',
-      cashfree_order_id: cashfreeOrder.order_id,
-      cashfree_payment_session_id: cashfreeOrder.payment_session_id,
-      admin_id: formAdmin.id,
-      gateway_fee: gatewayFee,
-      platform_commission: platformCommission,
-      net_amount_to_admin: formAdminAmount,
-      split_enabled: splitEnabled,
-      cashfree_vendor_id: splitEnabled ? formAdmin.cashfree_vendor_id : null,
-      split_status: splitEnabled ? 'pending' : 'disabled',
-      created_at: new Date().toISOString()
+    // Step 2: Create Payment Session
+    const sessionData = {
+      order_id: cashfreeOrder.cf_order_id,
+      payment_methods: {}
     };
 
-    const { data: transaction, error: dbError } = await supabase
-      .from('transactions')
-      .insert([transactionData])
-      .select()
-      .single();
+    const sessionResponse = await fetch(`https://sandbox.cashfree.com/pg/orders/${cashfreeOrder.cf_order_id}/payments`, {
+      method: 'POST',
+      headers: {
+        'x-client-id': CASHFREE_APP_ID,
+        'x-client-secret': CASHFREE_SECRET_KEY,
+        'x-api-version': '2023-08-01',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(sessionData)
+    });
 
-    if (dbError) {
-      console.error('❌ Database error:', dbError);
-      return {
-        statusCode: 500,
-        headers,
-        body: JSON.stringify({ error: 'Database error', details: dbError.message })
-      };
+    let checkoutUrl = null;
+
+    if (sessionResponse.ok) {
+      const sessionResult = await sessionResponse.json();
+      console.log('✅ Payment session created:', sessionResult);
+      checkoutUrl = sessionResult.payment_link || sessionResult.data?.payment_link;
     }
 
-    console.log('✅ Transaction saved with ID:', transaction.id);
-
-    // CREATE SPLIT TRANSACTION RECORD IF ENABLED
-    if (splitEnabled) {
-      const splitData = {
-        transaction_id: transaction.id,
-        form_admin_id: formAdmin.id,
-        total_amount: totalAmount,
-        platform_fee: platformCommission,
-        gateway_fee: gatewayFee,
-        form_admin_amount: formAdminAmount,
-        cashfree_split_id: cashfreeOrder.order_id,
-        split_status: 'pending'
+    // Fallback: Use Payment Links API if session creation failed
+    if (!checkoutUrl) {
+      console.log('🔄 Trying Payment Links API...');
+      const linkData = {
+        link_id: `link_${orderId}`,
+        link_amount: parseFloat(product_price),
+        link_currency: "INR",
+        link_purpose: `Payment for ${product_name}`,
+        customer_details: {
+          customer_name: customer_name,
+          customer_email: email,
+          customer_phone: customer_phone
+        },
+        link_meta: {
+          return_url: `https://payform2025.netlify.app/.netlify/functions/verify-cashfree-payment?order_id=${orderId}&form_id=${form_id}&email=${encodeURIComponent(email)}`
+        }
       };
 
-      await supabase.from('split_transactions').insert([splitData]);
-      console.log('✅ Split transaction record created');
+      const linkResponse = await fetch('https://sandbox.cashfree.com/pg/links', {
+        method: 'POST',
+        headers: {
+          'x-client-id': CASHFREE_APP_ID,
+          'x-client-secret': CASHFREE_SECRET_KEY,
+          'x-api-version': '2023-08-01',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(linkData)
+      });
+
+      if (linkResponse.ok) {
+        const linkResult = await linkResponse.json();
+        console.log('✅ Payment link created:', linkResult.link_url);
+        checkoutUrl = linkResult.link_url;
+      }
     }
 
-    // ✅ REVERTED: Use working payment URL format
-      
-    console.log('✅ Generated Payment URL:', paymentUrl);
-    console.log('=== ORDER CREATION COMPLETED ===');
+    // Final fallback checkout URL
+    if (!checkoutUrl) {
+      checkoutUrl = `https://payments.cashfree.com/forms/${cashfreeOrder.payment_session_id.replace(/paymentpayment$/, '')}`;
+    }
+
+    // ✅ Resolve admin ID for database logging
+    const adminId = await resolveAdminId(orderDetails);
+
+    // ✅ Log transaction to database
+    await logTransactionToDatabase(orderId, cashfreeOrder, orderDetails, adminId);
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: true,
-        payment_url: paymentUrl,
-        checkout_url: paymentUrl, // ✅ ADDED: For Google Apps Script compatibility
-        order_id: cashfreeOrder.order_id,
-        amount: totalAmount,
-        split_enabled: splitEnabled,
-        commission_breakdown: {
-          total: totalAmount,
-          gateway_fee: gatewayFee,
-          platform_commission: platformCommission,
-          form_admin_earnings: formAdminAmount
-        }
+        order_id: orderId,
+        cf_order_id: cashfreeOrder.cf_order_id,
+        checkout_url: checkoutUrl,
+        admin_id_used: adminId
       })
     };
 
   } catch (error) {
-    console.error('❌ Unexpected error:', error);
+    console.error('❌ Function error:', error);
     return {
       statusCode: 500,
       headers,
-      body: JSON.stringify({ error: 'Internal server error', details: error.message })
+      body: JSON.stringify({ 
+        success: false, 
+        error: error.message,
+        details: 'Check Netlify function logs for more information'
+      })
     };
   }
 };
+
+// ✅ Enhanced Admin ID Resolution with Multiple Strategies
+async function resolveAdminId(orderDetails) {
+  const { form_id, form_admin_id } = orderDetails;
+  
+  console.log('🔍 Resolving admin ID...', {
+    received_admin_id: form_admin_id || 'NONE',
+    form_id: form_id
+  });
+
+  // ✅ STRATEGY 1: Use admin ID from Google Apps Script (highest priority)
+  if (form_admin_id && form_admin_id.trim() !== '') {
+    console.log('✅ Using admin ID from Google Apps Script:', form_admin_id);
+    return form_admin_id;
+  }
+
+  // ✅ STRATEGY 2: Look up admin ID from form_configs table
+  try {
+    const SUPABASE_URL = process.env.SUPABASE_URL;
+    const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+      const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+      
+      const { data: formConfig, error } = await supabase
+        .from('form_configs')
+        .select('admin_id, form_name')
+        .eq('form_id', form_id)
+        .single();
+      
+      if (!error && formConfig?.admin_id) {
+        console.log('✅ Found admin ID in form_configs:', {
+          admin_id: formConfig.admin_id,
+          form_name: formConfig.form_name
+        });
+        return formConfig.admin_id;
+      } else {
+        console.log('⚠️ Form not found in form_configs:', error?.message || 'No data returned');
+      }
+    }
+  } catch (dbError) {
+    console.error('❌ Database lookup error:', dbError.message);
+  }
+
+  // ✅ STRATEGY 3: Get the first active admin as fallback (no hardcoding)
+  try {
+    const SUPABASE_URL = process.env.SUPABASE_URL;
+    const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+      const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+      
+      const { data: activeAdmin, error } = await supabase
+        .from('form_admins')
+        .select('id, email')
+        .eq('is_active', true)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .single();
+      
+      if (!error && activeAdmin?.id) {
+        console.log('⚠️ Using first active admin as fallback:', {
+          admin_id: activeAdmin.id,
+          email: activeAdmin.email
+        });
+        return activeAdmin.id;
+      }
+    }
+  } catch (fallbackError) {
+    console.error('❌ Fallback admin lookup error:', fallbackError.message);
+  }
+
+  // ✅ STRATEGY 4: Throw error instead of hardcoding
+  throw new Error(`Cannot resolve admin ID for form: ${form_id}. Please ensure the form is registered in PayForm dashboard.`);
+}
+
+// ✅ Enhanced Database Logging with Proper Variable Management
+async function logTransactionToDatabase(orderId, cashfreeOrder, orderDetails, adminId) {
+  try {
+    const SUPABASE_URL = process.env.SUPABASE_URL;
+    const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      console.log('⚠️ Supabase credentials not configured, skipping database logging');
+      return;
+    }
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    
+    console.log('💾 Logging transaction with admin ID:', adminId);
+    console.log('💾 Order details:', {
+      form_id: orderDetails.form_id,
+      email: orderDetails.email,
+      product_name: orderDetails.product_name,
+      amount: orderDetails.product_price
+    });
+
+    // Calculate commission split
+    const totalAmount = parseFloat(orderDetails.product_price);
+    const gatewayFee = (totalAmount * 2.5 / 100) + 3; // Cashfree: 2.5% + ₹3
+    const platformCommission = totalAmount * 3 / 100; // Platform: 3%
+    const netAmountToAdmin = totalAmount - gatewayFee - platformCommission;
+
+    // Insert transaction record
+    const transactionData = {
+      form_id: orderDetails.form_id,
+      email: orderDetails.email,
+      customer_name: orderDetails.customer_name,
+      product_name: orderDetails.product_name,
+      payment_amount: totalAmount,
+      payment_currency: 'INR',
+      payment_status: 'pending',
+      payment_provider: 'cashfree',
+      transaction_id: orderId,
+      cashfree_order_id: cashfreeOrder.cf_order_id,
+      gateway_fee: Number(gatewayFee.toFixed(2)),
+      platform_commission: Number(platformCommission.toFixed(2)),
+      net_amount_to_admin: Number(netAmountToAdmin.toFixed(2)),
+      admin_id: adminId,
+      created_at: new Date().toISOString()
+    };
+
+    console.log('💾 Transaction data summary:', {
+      transaction_id: orderId,
+      admin_id: adminId,
+      amount: totalAmount,
+      form_id: orderDetails.form_id,
+      net_amount_to_admin: Number(netAmountToAdmin.toFixed(2))
+    });
+
+    const { data, error: dbError } = await supabase
+      .from('transactions')
+      .insert([transactionData])
+      .select('id, admin_id');
+
+    if (dbError) {
+      console.error('❌ Database logging error:', dbError);
+      throw new Error(`Database logging failed: ${dbError.message}`);
+    } else {
+      console.log('✅ Transaction logged successfully:', data?.[0]);
+    }
+
+    // ✅ Log to platform_commissions table for revenue tracking
+    if (data?.[0]?.id) {
+      const commissionData = {
+        transaction_id: data[0].id,
+        form_admin_id: adminId,
+        commission_amount: Number(platformCommission.toFixed(2)),
+        commission_rate: 3.0,
+        platform_fee: Number(platformCommission.toFixed(2)),
+        gateway_fee: Number(gatewayFee.toFixed(2)),
+        net_amount_to_admin: Number(netAmountToAdmin.toFixed(2)),
+        status: 'pending',
+        created_at: new Date().toISOString()
+      };
+
+      const { error: commissionError } = await supabase
+        .from('platform_commissions')
+        .insert([commissionData]);
+
+      if (commissionError) {
+        console.error('⚠️ Commission logging error:', commissionError);
+      } else {
+        console.log('✅ Commission logged successfully');
+      }
+    }
+
+  } catch (error) {
+    console.error('❌ Database logging failed:', error);
+    // Don't throw error here - payment creation should still succeed
+    // even if database logging fails
+  }
+}
