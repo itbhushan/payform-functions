@@ -154,7 +154,10 @@ console.log('🔗 Generating payment page...');
 // Clean the session ID first
 let cleanSessionId = cashfreeOrder.payment_session_id;
 if (cleanSessionId && cleanSessionId.includes('payment')) {
-  cleanSessionId = cleanSessionId.replace(/payment+$/gi, '');
+  // Enhanced cleaning - remove any trailing "payment" text more aggressively
+cleanSessionId = cleanSessionId.replace(/payment+$/gi, '').replace(/paymentpayment$/gi, '');
+console.log('🔧 Original session ID length:', cashfreeOrder.payment_session_id.length);
+console.log('🔧 Cleaned session ID length:', cleanSessionId.length);
   console.log('🔧 Cleaned session ID:', cleanSessionId);
 }
 
