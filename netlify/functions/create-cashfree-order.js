@@ -100,7 +100,8 @@ exports.handler = async (event, context) => {
       },
       order_meta: {
         return_url: `${process.env.NETLIFY_URL || 'https://payform2025.netlify.app'}/.netlify/functions/verify-cashfree-payment?order_id=${orderId}`,
-        notify_url: `${process.env.NETLIFY_URL || 'https://payform2025.netlify.app'}/.netlify/functions/cashfree-webhook`
+        notify_url: `${process.env.NETLIFY_URL || 'https://payform2025.netlify.app'}/.netlify/functions/cashfree-webhook`,
+        payment_methods: null  // ✅ Add this field
       }
     };
 
@@ -129,7 +130,7 @@ exports.handler = async (event, context) => {
       headers: {
         'x-client-id': process.env.CASHFREE_APP_ID,
         'x-client-secret': process.env.CASHFREE_SECRET_KEY,
-        'x-api-version': '2023-08-01',
+        'x-api-version': '2025-01-01',  // ✅ Update to latest API version
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(orderPayload)
