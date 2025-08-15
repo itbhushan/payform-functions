@@ -148,64 +148,23 @@ exports.handler = async (event, context) => {
     const cashfreeOrder = await response.json();
     console.log('✅ Cashfree order created:', cashfreeOrder.order_id);
 
-    // Step 2: Create Payment Session to get actual checkout URL
-console.log('🔗 Creating payment session...');
+// Generate payment page URL using Cashfree JavaScript SDK approach
+console.log('🔗 Generating payment page...');
 
-const sessionPayload = {
-  payment_session_id: cashfreeOrder.payment_session_id.replace(/payment+$/gi, ''), // Clean the session ID
-  payment_methods: {}
-};
-
-const sessionResponse = await fetch(`https://sandbox.cashfree.com/pg/orders/${cashfreeOrder.order_id}/pay`, {
-  method: 'POST',
-  headers: {
-    'x-client-id': process.env.CASHFREE_APP_ID,
-    'x-client-secret': process.env.CASHFREE_SECRET_KEY,
-    'x-api-version': '2023-08-01',
-    'Content-Type': 'application/json'
-  },
-  body: JSON.stringify(sessionPayload)
-});
-
-let paymentUrl = null;
-
-if (sessionResponse.ok) {
-  const sessionData = await sessionResponse.json();
-  console.log('✅ Payment session created:', JSON.stringify(sessionData, null, 2));
-  
-  // Look for the actual payment URL in session response
-  paymentUrl = sessionData.payment_link || 
-               sessionData.checkout_url || 
-               sessionData.hosted_checkout_url ||
-               sessionData.redirect_url;
-               
-  if (paymentUrl) {
-    console.log('✅ Found actual payment URL:', paymentUrl);
-  }
-} else {
-  const errorText = await sessionResponse.text();
-  console.log('⚠️ Payment session creation failed:', errorText);
+// Clean the session ID first
+let cleanSessionId = cashfreeOrder.payment_session_id;
+if (cleanSessionId && cleanSessionId.includes('payment')) {
+  cleanSessionId = cleanSessionId.replace(/payment+$/gi, '');
+  console.log('🔧 Cleaned session ID:', cleanSessionId);
 }
 
-// Fallback: Use order-based checkout URL if session fails
-if (!paymentUrl) {
-  // Try different Cashfree URL formats for sandbox
-const possibleUrls = [
-  `https://test.cashfree.com/billpay/checkout/post/submit/${cashfreeOrder.cf_order_id}`,
-  `https://sandbox.cashfree.com/pg/orders/${cashfreeOrder.order_id}/sessions`,
-  `https://payments-test.cashfree.com/orders/${cashfreeOrder.cf_order_id}`,
-  `https://test.cashfree.com/pg/view/order/${cashfreeOrder.order_id}`
-];
+// Create payment page URL that will serve HTML with Cashfree SDK
+const paymentPageId = `payment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+const paymentUrl = `${process.env.NETLIFY_URL || 'https://payform2025.netlify.app'}/.netlify/functions/payment-page?id=${paymentPageId}&session=${encodeURIComponent(cleanSessionId)}&amount=${totalAmount}&product=${encodeURIComponent(product_name || 'Product')}&order=${cashfreeOrder.order_id}`;
 
-// Use the first URL format for now
-paymentUrl = possibleUrls[0];
-console.log('🧪 Trying URL format:', paymentUrl);
-console.log('🔍 Available cf_order_id:', cashfreeOrder.cf_order_id);
-  
-  console.log('🔄 Using fallback order URL:', paymentUrl);
-}
+console.log('✅ Generated payment page URL:', paymentUrl);
+console.log('🔧 Using cleaned session ID:', cleanSessionId);
     
-
     // Right after: const cashfreeOrder = await response.json();
 console.log('🔍 === COMPLETE CASHFREE RESPONSE DEBUG ===');
 console.log('Full Response:', JSON.stringify(cashfreeOrder, null, 2));
