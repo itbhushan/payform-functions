@@ -189,7 +189,19 @@ if (sessionResponse.ok) {
 
 // Fallback: Use order-based checkout URL if session fails
 if (!paymentUrl) {
-  paymentUrl = `https://sandbox.cashfree.com/pg/view/order/${cashfreeOrder.order_id}`;
+  // Try different Cashfree URL formats for sandbox
+const possibleUrls = [
+  `https://test.cashfree.com/billpay/checkout/post/submit/${cashfreeOrder.cf_order_id}`,
+  `https://sandbox.cashfree.com/pg/orders/${cashfreeOrder.order_id}/sessions`,
+  `https://payments-test.cashfree.com/orders/${cashfreeOrder.cf_order_id}`,
+  `https://test.cashfree.com/pg/view/order/${cashfreeOrder.order_id}`
+];
+
+// Use the first URL format for now
+paymentUrl = possibleUrls[0];
+console.log('🧪 Trying URL format:', paymentUrl);
+console.log('🔍 Available cf_order_id:', cashfreeOrder.cf_order_id);
+  
   console.log('🔄 Using fallback order URL:', paymentUrl);
 }
     
