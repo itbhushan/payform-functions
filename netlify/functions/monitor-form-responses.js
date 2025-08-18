@@ -1,4 +1,4 @@
-// netlify/functions/monitor-form-responses.js - ENHANCED VERSION
+// netlify/functions/monitor-form-responses.js - FIXED VERSION
 const { createClient } = require('@supabase/supabase-js');
 const { google } = require('googleapis');
 
@@ -10,7 +10,7 @@ exports.handler = async (event, context) => {
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Get all active form configurations with admin preferences
+    // 🔧 FIXED: Get form configs with admin details (separate queries)
     const { data: formConfigs, error: configError } = await supabase
       .from('form_configs')
       .select(`
@@ -22,8 +22,7 @@ exports.handler = async (event, context) => {
           preferred_gateway,
           auto_splits_enabled,
           razorpay_account_id
-        ),
-        form_field_mappings (*)
+        )
       `)
       .eq('is_active', true);
 
@@ -67,16 +66,22 @@ exports.handler = async (event, context) => {
 };
 
 async function processFormResponses(formConfig, supabase) {
-  const { form_id, form_admins: formAdmin, form_field_mappings: fieldMapping } = formConfig;
+  const { form_id, form_admins: formAdmin } = formConfig;
   
   console.log(`Processing form: ${form_id} (Admin: ${formAdmin.email})`);
 
-  if (!fieldMapping || fieldMapping.length === 0) {
+  // 🔧 FIXED: Get field mapping separately to avoid relationship issues
+  const { data: fieldMappings } = await supabase
+    .from('form_field_mappings')
+    .select('*')
+    .eq('form_id', form_id);
+
+  if (!fieldMappings || fieldMappings.length === 0) {
     console.log(`No field mapping found for form ${form_id}`);
     return;
   }
 
-  const mapping = fieldMapping[0];
+  const mapping = fieldMappings[0];
 
   // Get Google access token for this admin
   const { data: authToken } = await supabase
@@ -192,7 +197,8 @@ async function processIndividualResponse(formResponse, formConfig, mapping, supa
         email: responseData.email,
         product_name: productName,
         product_price: productPrice,
-        customer_name: responseData.name
+        customer_name: responseData.name,
+        form_admin_id: formAdmin.id
       });
     }
 
@@ -307,10 +313,10 @@ async function createRazorpayOrder(orderData) {
   }
 }
 
-// Existing Cashfree function (enhanced)
+// Enhanced Cashfree function
 async function createCashfreeOrder(orderData) {
   try {
-    const response = await fetch(`${process.env.URL}/.netlify/functions/create-cashfree-order`, {
+    const response = await fetch(`${process.env.URL}/.netlify/functions/create-cashfree-payment`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(orderData)
@@ -319,10 +325,16 @@ async function createCashfreeOrder(orderData) {
     const result = await response.json();
     
     if (result.success) {
+      // Handle redirect to Razorpay if admin prefers it
+      if (result.redirect_to_razorpay) {
+        console.log('Redirecting to Razorpay Route...');
+        return await createRazorpayOrder(orderData);
+      }
+      
       return {
         success: true,
         order_id: result.order_id,
-        payment_url: result.payment_link,
+        payment_url: result.checkout_url,
         gateway: 'cashfree'
       };
     } else {
@@ -346,7 +358,6 @@ async function sendPaymentEmail({ email, name, product_name, product_price, paym
     });
 
     // Use your existing email sending mechanism
-    // This could be via Gmail API, SendGrid, or other email service
     console.log(`Sending ${gateway} payment email to: ${email}`);
     
     // Placeholder for actual email sending
