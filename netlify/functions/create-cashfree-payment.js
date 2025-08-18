@@ -1,4 +1,4 @@
-// netlify/functions/create-cashfree-payment.js - DEBUG VERSION
+// netlify/functions/create-cashfree-payment.js - ENHANCED FOR DUAL GATEWAY
 const { createClient } = require('@supabase/supabase-js');
 
 exports.handler = async (event, context) => {
@@ -67,63 +67,34 @@ exports.handler = async (event, context) => {
     // Create Supabase client
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // 🔍 DEBUG: Check if form_configs table exists and has data
+    // 🔍 Get form configuration with admin preferences
     console.log('🔍 Checking form_configs table...');
     
     try {
-      // First, check if the table exists
-      const { data: tableCheck, error: tableError } = await supabase
-        .from('form_configs')
-        .select('count', { count: 'exact' });
-      
-      console.log('📊 form_configs table check:', { 
-        exists: !tableError, 
-        count: tableCheck?.length || 0,
-        error: tableError?.message 
-      });
-
-      if (tableError) {
-        console.error('❌ form_configs table error:', tableError);
-        return {
-          statusCode: 500,
-          headers,
-          body: JSON.stringify({ 
-            success: false,
-            error: 'Form configs table not found. Please run database setup first.',
-            details: tableError.message
-          })
-        };
-      }
-
-      // Check for specific form configuration
+      // Get form config with admin preferences
       const { data: formConfig, error: configError } = await supabase
         .from('form_configs')
-        .select('*')
-        .eq('form_id', form_id);
+        .select(`
+          *,
+          form_admins (
+            id,
+            email,
+            name,
+            preferred_gateway,
+            auto_splits_enabled
+          )
+        `)
+        .eq('form_id', form_id)
+        .single();
 
       console.log('🔍 Form config lookup:', {
         form_id,
-        found: formConfig?.length || 0,
-        config: formConfig,
+        found: !!formConfig,
+        admin_gateway: formConfig?.form_admins?.preferred_gateway,
         error: configError?.message
       });
 
-      if (configError) {
-        console.error('❌ Form config lookup error:', configError);
-        return {
-          statusCode: 500,
-          headers,
-          body: JSON.stringify({ 
-            success: false,
-            error: 'Database query error',
-            details: configError.message
-          })
-        };
-      }
-
-      if (!formConfig || formConfig.length === 0) {
-        console.error('❌ Form configuration not found for:', form_id);
-        
+      if (configError || !formConfig) {
         // 🔧 AUTO-CREATE form config if admin_id is provided
         if (form_admin_id) {
           console.log('🔧 Auto-creating form config...');
@@ -141,7 +112,16 @@ exports.handler = async (event, context) => {
                 commission_rate: 3.0
               }
             })
-            .select()
+            .select(`
+              *,
+              form_admins (
+                id,
+                email,
+                name,
+                preferred_gateway,
+                auto_splits_enabled
+              )
+            `)
             .single();
 
           if (createError) {
@@ -159,7 +139,7 @@ exports.handler = async (event, context) => {
           }
 
           console.log('✅ Form config auto-created:', newConfig);
-          // Continue with the newly created config
+          formConfig = newConfig;
         } else {
           return {
             statusCode: 404,
@@ -174,7 +154,8 @@ exports.handler = async (event, context) => {
         }
       }
 
-      const adminId = form_admin_id || formConfig[0]?.admin_id;
+      const formAdmin = formConfig.form_admins;
+      const adminId = form_admin_id || formAdmin?.id;
       
       if (!adminId) {
         return {
@@ -187,7 +168,37 @@ exports.handler = async (event, context) => {
         };
       }
 
-      console.log('✅ Form config found, admin_id:', adminId);
+      // 🆕 NEW: Check if admin prefers Razorpay and it's available
+      const preferredGateway = formAdmin?.preferred_gateway || 'cashfree';
+      
+      if (preferredGateway === 'razorpay' && formAdmin?.auto_splits_enabled) {
+        console.log('🔄 Admin prefers Razorpay Route, redirecting...');
+        
+        // Check if Razorpay account is activated
+        const { data: razorpayAccount } = await supabase
+          .from('razorpay_linked_accounts')
+          .select('*')
+          .eq('form_admin_id', adminId)
+          .eq('account_status', 'activated')
+          .single();
+
+        if (razorpayAccount) {
+          // Redirect to Razorpay Route
+          return {
+            statusCode: 200,
+            headers,
+            body: JSON.stringify({
+              success: true,
+              redirect_to_razorpay: true,
+              message: 'Using Razorpay Route for automatic splits'
+            })
+          };
+        } else {
+          console.log('⚠️ Razorpay not activated, falling back to Cashfree');
+        }
+      }
+
+      console.log('✅ Using Cashfree payment gateway');
 
     } catch (dbError) {
       console.error('❌ Database connection error:', dbError);
@@ -202,7 +213,7 @@ exports.handler = async (event, context) => {
       };
     }
 
-    // Continue with payment creation...
+    // Continue with Cashfree payment creation...
     const orderId = `payform_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const customerId = email.replace('@', '_').replace('.', '_');
     
@@ -233,7 +244,7 @@ exports.handler = async (event, context) => {
       link_expiry_time: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       link_notes: {
         form_id: form_id,
-        admin_id: form_admin_id || formConfig[0]?.admin_id,
+        admin_id: adminId,
         product_name: product_name,
         customer_email: email
       },
@@ -284,29 +295,30 @@ exports.handler = async (event, context) => {
     }
 
     // Save transaction to database
-const adminId = form_admin_id || formConfig[0]?.admin_id;
+    const adminId = form_admin_id || formConfig.form_admins?.id;
 
-const transactionData = {
-  form_id: form_id,
-  email: email,
-  customer_name: customer_name || email.split('@')[0],
-  product_name: product_name,
-  payment_amount: totalAmount,
-  payment_currency: 'INR',
-  payment_status: 'pending',
-  payment_provider: 'cashfree',
-  transaction_id: orderId,
-  cashfree_order_id: orderId,
-  cashfree_link_id: cashfreeResult.link_id,
-  gateway_fee: Number(gatewayFee.toFixed(2)),
-  platform_commission: Number(platformCommission.toFixed(2)),
-  net_amount_to_admin: Number(netAmountToAdmin.toFixed(2)),
-  admin_id: adminId,
-  created_at: new Date().toISOString()
-};
+    const transactionData = {
+      form_id: form_id,
+      email: email,
+      customer_name: customer_name || email.split('@')[0],
+      product_name: product_name,
+      payment_amount: totalAmount,
+      payment_currency: 'INR',
+      payment_status: 'pending',
+      payment_provider: 'cashfree',
+      transaction_id: orderId,
+      cashfree_order_id: orderId,
+      cashfree_link_id: cashfreeResult.link_id,
+      gateway_fee: Number(gatewayFee.toFixed(2)),
+      platform_commission: Number(platformCommission.toFixed(2)),
+      net_amount_to_admin: Number(netAmountToAdmin.toFixed(2)),
+      admin_id: adminId,
+      gateway_used: 'cashfree', // 🆕 NEW: Track which gateway was used
+      auto_split_enabled: false, // 🆕 NEW: Cashfree uses manual splits
+      created_at: new Date().toISOString()
+    };
 
     console.log('💾 Transaction data to save:', transactionData);
-    console.log('🔍 Admin ID being used:', adminId);
     console.log('💾 Saving transaction to database...');
 
     const { error: dbError } = await supabase
@@ -325,6 +337,7 @@ const transactionData = {
       headers,
       body: JSON.stringify({
         success: true,
+        gateway: 'cashfree',
         checkout_url: cashfreeResult.link_url,
         order_id: orderId,
         amount: totalAmount,
