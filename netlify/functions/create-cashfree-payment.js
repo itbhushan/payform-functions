@@ -73,6 +73,7 @@ exports.handler = async (event, context) => {
     try {
       // Get form config with admin preferences
 // Get form config (separate query to avoid relationship issues)
+let formConfig;
 const { data: formConfig, error: configError } = await supabase
   .from('form_configs')
   .select('*')
@@ -146,7 +147,7 @@ if (formConfig && formConfig.admin_id) {
           }
 
           console.log('✅ Form config auto-created:', newConfig);
-          formConfig = newConfig;
+          formConfig = configData || newConfig;
         } else {
           return {
             statusCode: 404,
