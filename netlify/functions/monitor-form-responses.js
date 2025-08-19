@@ -259,7 +259,7 @@ async function processIndividualResponse(formResponse, formConfig, mapping, supa
 }
 
 function extractResponseData(answers, mapping) {
-   // 🔍 DEBUG: Log the actual response structure
+  // 🔍 DEBUG: Log the actual response structure (keep for now)
   console.log('=== DEBUG: Response Structure ===');
   console.log('Available answer keys:', Object.keys(answers));
   console.log('Field mapping being used:', JSON.stringify(mapping, null, 2));
@@ -272,25 +272,82 @@ function extractResponseData(answers, mapping) {
     phone: ''
   };
 
-  // Extract data based on field mappings
-  if (mapping.email_field_id && answers[mapping.email_field_id]) {
-    data.email = answers[mapping.email_field_id].textAnswers?.answers?.[0]?.value || '';
+  // Enhanced extraction that handles multiple ID formats
+  const answerKeys = Object.keys(answers);
+  
+  // Try to extract email
+  data.email = extractFieldValue(answers, mapping.email_field_id, answerKeys) || '';
+  
+  // Try to extract product
+  data.product = extractFieldValue(answers, mapping.product_field_id, answerKeys) || '';
+  
+  // Try to extract name
+  data.name = extractFieldValue(answers, mapping.name_field_id, answerKeys) || '';
+  
+  // Try to extract phone
+  data.phone = extractFieldValue(answers, mapping.phone_field_id, answerKeys) || '';
+
+  // If still empty, try intelligent field detection
+  if (!data.email && !data.product) {
+    console.log('Trying intelligent field detection...');
+    const intelligentData = intelligentFieldDetection(answers, answerKeys);
+    if (intelligentData.email) data.email = intelligentData.email;
+    if (intelligentData.product) data.product = intelligentData.product;
+    if (intelligentData.name) data.name = intelligentData.name;
   }
 
-  if (mapping.product_field_id && answers[mapping.product_field_id]) {
-    data.product = answers[mapping.product_field_id].textAnswers?.answers?.[0]?.value || '';
-  }
-
-  if (mapping.name_field_id && answers[mapping.name_field_id]) {
-    data.name = answers[mapping.name_field_id].textAnswers?.answers?.[0]?.value || '';
-  }
-
-  if (mapping.phone_field_id && answers[mapping.phone_field_id]) {
-    data.phone = answers[mapping.phone_field_id].textAnswers?.answers?.[0]?.value || '';
-  }
-
+  console.log('Extracted data:', data);
   return data;
 }
+
+// Helper function to extract field value with multiple ID format support
+function extractFieldValue(answers, fieldId, answerKeys) {
+  if (!fieldId) return '';
+  
+  // Method 1: Direct match (for questionId format)
+  if (answers[fieldId]) {
+    return answers[fieldId].textAnswers?.answers?.[0]?.value || '';
+  }
+  
+  // Method 2: Try numeric index (for 0,1,2 format)
+  if (!isNaN(fieldId) && answerKeys[parseInt(fieldId)]) {
+    const key = answerKeys[parseInt(fieldId)];
+    return answers[key].textAnswers?.answers?.[0]?.value || '';
+  }
+  
+  // Method 3: Entry-based lookup (convert entry.xxx to find matching questionId)
+  // This would require a more complex mapping - for now just log
+  console.log(`Could not find field for ID: ${fieldId}`);
+  return '';
+}
+
+// Intelligent field detection based on content patterns
+function intelligentFieldDetection(answers, answerKeys) {
+  const result = { email: '', product: '', name: '' };
+  
+  answerKeys.forEach(key => {
+    const value = answers[key].textAnswers?.answers?.[0]?.value || '';
+    
+    // Email detection
+    if (value.includes('@') && !result.email) {
+      result.email = value;
+    }
+    
+    // Product detection (contains currency symbol)
+    if (value.includes('₹') && !result.product) {
+      result.product = value;
+    }
+    
+    // Name detection (basic heuristic)
+    if (!result.name && value.length > 2 && value.length < 50 && 
+        !value.includes('@') && !value.includes('₹')) {
+      result.name = value;
+    }
+  });
+  
+  return result;
+}
+
 
 // 🆕 NEW: Create Razorpay order with splits
 async function createRazorpayOrder(orderData) {
