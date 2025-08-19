@@ -72,21 +72,28 @@ exports.handler = async (event, context) => {
     
     try {
       // Get form config with admin preferences
-      const { data: formConfig, error: configError } = await supabase
-        .from('form_configs')
-        .select(`
-          *,
-          form_admins (
-            id,
-            email,
-            name,
-            preferred_gateway,
-            auto_splits_enabled
-          )
-        `)
-        .eq('form_id', form_id)
-        .single();
+// Get form config (separate query to avoid relationship issues)
+const { data: formConfig, error: configError } = await supabase
+  .from('form_configs')
+  .select('*')
+  .eq('form_id', form_id)
+  .single();
 
+console.log('🔍 Form config result:', { formConfig, configError });
+
+let formAdmin = null;
+if (formConfig && formConfig.admin_id) {
+  // Get admin details separately
+  const { data: adminData, error: adminError } = await supabase
+    .from('form_admins')
+    .select('id, email, name, preferred_gateway, auto_splits_enabled, razorpay_account_id')
+    .eq('id', formConfig.admin_id)
+    .single();
+    
+  console.log('🔍 Admin lookup result:', { adminData, adminError });
+  formAdmin = adminData;
+}
+      
       console.log('🔍 Form config lookup:', {
         form_id,
         found: !!formConfig,
@@ -154,7 +161,7 @@ exports.handler = async (event, context) => {
         }
       }
 
-      const formAdmin = formConfig.form_admins;
+      //const formAdmin = formConfig.form_admins;
       const adminId = form_admin_id || formAdmin?.id;
       
       if (!adminId) {
