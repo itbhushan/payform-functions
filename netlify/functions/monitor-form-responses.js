@@ -259,6 +259,12 @@ async function processIndividualResponse(formResponse, formConfig, mapping, supa
 }
 
 function extractResponseData(answers, mapping) {
+   // 🔍 DEBUG: Log the actual response structure
+  console.log('=== DEBUG: Response Structure ===');
+  console.log('Available answer keys:', Object.keys(answers));
+  console.log('Field mapping being used:', JSON.stringify(mapping, null, 2));
+  console.log('First answer sample:', JSON.stringify(Object.values(answers)[0], null, 2));
+  
   const data = {
     email: '',
     product: '',
