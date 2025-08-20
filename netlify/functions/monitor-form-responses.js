@@ -10,7 +10,7 @@ exports.handler = async (event, context) => {
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // 🔧 FIXED: Get form configs with admin details (separate queries)
+    // Get form configs with admin details (separate queries)
     const { data: formConfigs, error: configError } = await supabase
       .from('form_configs')
       .select(`
@@ -18,10 +18,7 @@ exports.handler = async (event, context) => {
         form_admins (
           id,
           email,
-          name,
-          preferred_gateway,
-          auto_splits_enabled,
-          razorpay_account_id
+          name
         )
       `)
       .eq('is_active', true);
@@ -70,7 +67,7 @@ async function processFormResponses(formConfig, supabase) {
   
   console.log(`Processing form: ${form_id} (Admin: ${formAdmin.email})`);
 
-  // 🔧 FIXED: Get field mapping separately to avoid relationship issues
+  // Get field mapping separately to avoid relationship issues
   const { data: fieldMappings } = await supabase
     .from('form_field_mappings')
     .select('*')
@@ -170,44 +167,29 @@ async function processIndividualResponse(formResponse, formConfig, mapping, supa
 
   console.log(`Creating payment for: ${responseData.email}, Product: ${productName}, Price: ₹${productPrice}`);
 
-  // 🆕 NEW: Determine which gateway to use based on admin preference
-  const preferredGateway = formAdmin.preferred_gateway || 'cashfree';
+  // 🆕 FIXED: Always use Razorpay for all payments
+  console.log('Using Razorpay for payment processing');
   
   let paymentResult;
   
   try {
-    if (preferredGateway === 'razorpay' && formAdmin.auto_splits_enabled && formAdmin.razorpay_account_id) {
-      // Use Razorpay Route with auto-splits
-      console.log(`Using Razorpay Route for automatic splits`);
-      
-      paymentResult = await createRazorpayOrder({
-        form_id,
-        email: responseData.email,
-        product_name: productName,
-        product_price: productPrice,
-        customer_name: responseData.name
-      });
-      
-    } else {
-      // Use Cashfree (manual payouts)
-      console.log(`Using Cashfree for manual payouts`);
-      
-      paymentResult = await createCashfreeOrder({
-        form_id,
-        email: responseData.email,
-        product_name: productName,
-        product_price: productPrice,
-        customer_name: responseData.name,
-        form_admin_id: formAdmin.id
-      });
-    }
+    // Create Razorpay order
+    paymentResult = await createRazorpayOrder({
+      form_id,
+      email: responseData.email,
+      product_name: productName,
+      product_price: productPrice,
+      customer_name: responseData.name,
+      phone: responseData.phone
+    });
 
     if (paymentResult.success) {
       // Mark response as processed
       await supabase.from('processed_form_responses').insert({
         response_id: responseId,
         form_id: form_id,
-        cashfree_order_id: paymentResult.order_id,
+        order_id: paymentResult.order_id,
+        payment_provider: 'razorpay',
         processed_at: new Date().toISOString()
       });
 
@@ -218,10 +200,10 @@ async function processIndividualResponse(formResponse, formConfig, mapping, supa
         product_name: productName,
         product_price: productPrice,
         payment_url: paymentResult.payment_url,
-        gateway: paymentResult.gateway || preferredGateway
+        order_id: paymentResult.order_id
       });
 
-      console.log(`Payment created successfully: ${paymentResult.order_id}`);
+      console.log(`✅ Razorpay payment created successfully: ${paymentResult.order_id}`);
 
       // Log successful processing
       await supabase.from('monitoring_logs').insert({
@@ -232,7 +214,7 @@ async function processIndividualResponse(formResponse, formConfig, mapping, supa
           email: responseData.email,
           product_name: productName,
           amount: productPrice,
-          gateway: paymentResult.gateway || preferredGateway,
+          gateway: 'razorpay',
           order_id: paymentResult.order_id
         }
       });
@@ -252,14 +234,16 @@ async function processIndividualResponse(formResponse, formConfig, mapping, supa
         form_id: form_id,
         email: responseData.email,
         error: error.message,
-        gateway: preferredGateway
+        gateway: 'razorpay'
       }
     });
+    
+    throw error; // Re-throw to trigger error handling in parent function
   }
 }
 
 function extractResponseData(answers, mapping) {
-  // 🔍 DEBUG: Log the actual response structure (keep for now)
+  // DEBUG: Log the actual response structure
   console.log('=== DEBUG: Response Structure ===');
   console.log('Available answer keys:', Object.keys(answers));
   console.log('Field mapping being used:', JSON.stringify(mapping, null, 2));
@@ -288,7 +272,7 @@ function extractResponseData(answers, mapping) {
   data.phone = extractFieldValue(answers, mapping.phone_field_id, answerKeys) || '';
 
   // If still empty, try intelligent field detection
-  if (!data.email && !data.product) {
+  if (!data.email || !data.product) {
     console.log('Trying intelligent field detection...');
     const intelligentData = intelligentFieldDetection(answers, answerKeys);
     if (intelligentData.email) data.email = intelligentData.email;
@@ -315,8 +299,7 @@ function extractFieldValue(answers, fieldId, answerKeys) {
     return answers[key].textAnswers?.answers?.[0]?.value || '';
   }
   
-  // Method 3: Entry-based lookup (convert entry.xxx to find matching questionId)
-  // This would require a more complex mapping - for now just log
+  // Method 3: Entry-based lookup - just log for debugging
   console.log(`Could not find field for ID: ${fieldId}`);
   return '';
 }
@@ -340,7 +323,7 @@ function intelligentFieldDetection(answers, answerKeys) {
     
     // Name detection (basic heuristic)
     if (!result.name && value.length > 2 && value.length < 50 && 
-        !value.includes('@') && !value.includes('₹')) {
+        !value.includes('@') && !value.includes('₹') && !value.includes('+')) {
       result.name = value;
     }
   });
@@ -348,127 +331,101 @@ function intelligentFieldDetection(answers, answerKeys) {
   return result;
 }
 
-
-// 🆕 NEW: Create Razorpay order with splits
+// Create Razorpay order using your working function
 async function createRazorpayOrder(orderData) {
   try {
+    console.log('🔄 Calling create-razorpay-order function...');
+    
     const response = await fetch(`${process.env.URL}/.netlify/functions/create-razorpay-order`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(orderData)
     });
 
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
     const result = await response.json();
+    console.log('🔄 Razorpay order result:', result);
     
     if (result.success) {
       return {
         success: true,
         order_id: result.order_id,
-        payment_url: `https://checkout.razorpay.com/v1/checkout.js?order_id=${result.order_id}&key_id=${result.key_id}`,
-        gateway: 'razorpay'
+        payment_url: result.payment_url,
+        amount: result.amount,
+        currency: result.currency
       };
     } else {
-      throw new Error(result.error);
+      throw new Error(result.error || 'Unknown error from Razorpay function');
     }
   } catch (error) {
-    console.error('Razorpay order creation failed:', error);
+    console.error('❌ Razorpay order creation failed:', error);
     return { success: false, error: error.message };
   }
 }
 
-// Enhanced Cashfree function
-async function createCashfreeOrder(orderData) {
+// Send payment email with Razorpay branding
+async function sendPaymentEmail({ email, name, product_name, product_price, payment_url, order_id }) {
   try {
-    const response = await fetch(`${process.env.URL}/.netlify/functions/create-cashfree-payment`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(orderData)
-    });
-
-    const result = await response.json();
+    console.log(`📧 Sending Razorpay payment email to: ${email}`);
     
-    if (result.success) {
-      // Handle redirect to Razorpay if admin prefers it
-      if (result.redirect_to_razorpay) {
-        console.log('Redirecting to Razorpay Route...');
-        return await createRazorpayOrder(orderData);
-      }
-      
-      return {
-        success: true,
-        order_id: result.order_id,
-        payment_url: result.checkout_url,
-        gateway: 'cashfree'
-      };
-    } else {
-      throw new Error(result.error);
-    }
-  } catch (error) {
-    console.error('Cashfree order creation failed:', error);
-    return { success: false, error: error.message };
-  }
-}
-
-// Enhanced email function with gateway-specific templates
-async function sendPaymentEmail({ email, name, product_name, product_price, payment_url, gateway }) {
-  try {
-    const emailContent = generateEmailContent({
-      name,
-      product_name,
-      product_price,
-      payment_url,
-      gateway
-    });
-
-    // Use your existing email sending mechanism
-    console.log(`Sending ${gateway} payment email to: ${email}`);
-    
-    // Placeholder for actual email sending
-    // You can integrate with your existing email system here
-    
-    return true;
-  } catch (error) {
-    console.error('Email sending failed:', error);
-    return false;
-  }
-}
-
-function generateEmailContent({ name, product_name, product_price, payment_url, gateway }) {
-  const gatewayName = gateway === 'razorpay' ? 'Razorpay (Auto-Split)' : 'Cashfree';
-  const payoutMessage = gateway === 'razorpay' 
-    ? 'Your payment will be automatically processed with instant settlement.'
-    : 'Your payment will be processed manually by our team.';
-
-  return {
-    subject: `Complete your payment for ${product_name}`,
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2>Hi ${name}!</h2>
-        <p>Thank you for your interest in <strong>${product_name}</strong>.</p>
-        
-        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-          <h3>Order Summary:</h3>
-          <p><strong>Product:</strong> ${product_name}</p>
-          <p><strong>Amount:</strong> ₹${product_price}</p>
-          <p><strong>Payment Gateway:</strong> ${gatewayName}</p>
+    const emailContent = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="text-align: center; margin-bottom: 30px;">
+          <h2 style="color: #528FF0;">Complete Your Payment</h2>
         </div>
-
+        
+        <p>Hello ${name || 'Customer'},</p>
+        <p>Thank you for your submission! Please complete your payment by clicking the button below:</p>
+        
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #528FF0;">
+          <h3 style="margin: 0 0 15px 0; color: #495057;">Order Summary</h3>
+          <p style="margin: 5px 0;"><strong>Product:</strong> ${product_name}</p>
+          <p style="margin: 5px 0;"><strong>Amount:</strong> ₹${product_price}</p>
+          <p style="margin: 5px 0;"><strong>Order ID:</strong> ${order_id}</p>
+        </div>
+        
         <div style="text-align: center; margin: 30px 0;">
           <a href="${payment_url}" 
-             style="background: #007bff; color: white; padding: 15px 30px; 
-                    text-decoration: none; border-radius: 5px; font-size: 16px;">
-            Pay ₹${product_price} Securely
+             style="background: #528FF0; color: white; padding: 15px 30px; 
+                    text-decoration: none; border-radius: 5px; font-size: 16px; 
+                    display: inline-block;">
+            💳 Pay ₹${product_price} Securely
           </a>
         </div>
 
-        <p style="font-size: 14px; color: #666;">
-          ${payoutMessage}
-        </p>
+        <div style="background: #e7f3ff; padding: 15px; border-radius: 5px; margin: 20px 0;">
+          <p style="margin: 0; font-size: 14px; color: #0066cc;">
+            🔒 <strong>Secure Payment via Razorpay</strong><br>
+            Your payment is processed securely with bank-level encryption.
+          </p>
+        </div>
 
-        <p>If you have any questions, feel free to reply to this email.</p>
+        <p style="font-size: 14px; color: #666;">
+          If you have any questions or need assistance, please reply to this email.
+        </p>
         
-        <p>Best regards,<br>PayForm Team</p>
+        <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+        
+        <p style="font-size: 12px; color: #999; text-align: center;">
+          This email was sent by PayForm. Powered by Razorpay payments.
+        </p>
       </div>
-    `
-  };
+    `;
+
+    // Note: You'll need to implement actual email sending here
+    // This could be via Gmail API, SendGrid, or your preferred email service
+    console.log('📧 Email content prepared for:', email);
+    console.log('📧 Email HTML preview prepared');
+    
+    // TODO: Implement actual email sending
+    // Example: await gmailAPI.sendEmail(email, subject, emailContent);
+    
+    return true;
+  } catch (error) {
+    console.error('❌ Email sending failed:', error);
+    return false;
+  }
 }
