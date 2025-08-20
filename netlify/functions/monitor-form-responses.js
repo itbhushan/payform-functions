@@ -184,6 +184,10 @@ async function processIndividualResponse(formResponse, formConfig, mapping, supa
     });
 
     if (paymentResult.success) {
+      // Calculate commission (3% platform fee)
+      const platformCommission = productPrice * 0.03;
+      const netAmountToAdmin = productPrice - platformCommission;
+      
       // Mark response as processed
       await supabase.from('processed_form_responses').insert({
         response_id: responseId,
@@ -192,6 +196,30 @@ async function processIndividualResponse(formResponse, formConfig, mapping, supa
         payment_provider: 'razorpay',
         processed_at: new Date().toISOString()
       });
+
+      // 🆕 CRITICAL: Log transaction to database
+      const { error: transactionError } = await supabase.from('transactions').insert({
+        form_id: form_id,
+        email: responseData.email,
+        customer_name: responseData.name,
+        product_name: productName,
+        payment_amount: productPrice,
+        payment_currency: paymentResult.currency || 'INR',
+        payment_status: 'pending',
+        payment_provider: 'razorpay',
+        transaction_id: paymentResult.order_id,
+        gateway_fee: 0, // Will be updated when payment completes
+        platform_commission: platformCommission,
+        net_amount_to_admin: netAmountToAdmin,
+        admin_id: formConfig.admin_id,
+        created_at: new Date().toISOString()
+      });
+
+      if (transactionError) {
+        console.error('❌ Failed to log transaction:', transactionError);
+      } else {
+        console.log('✅ Transaction logged to database');
+      }
 
       // Send email notification
       await sendPaymentEmail({
