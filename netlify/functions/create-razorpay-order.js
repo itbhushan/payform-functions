@@ -1,24 +1,37 @@
-// netlify/functions/create-razorpay-order.js
+// netlify/functions/create-razorpay-order.js - FIXED VERSION
 const { createClient } = require('@supabase/supabase-js');
 
-exports.handler = async (event, context) => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Content-Type': 'application/json'
-  };
+// Initialize Supabase client
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
+// CORS headers
+const headers = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Content-Type': 'application/json'
+};
+
+exports.handler = async (event, context) => {
   // Handle CORS preflight
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers, body: '' };
   }
 
   try {
-    console.log('Creating Razorpay order with splits...');
+    console.log('🔄 Razorpay order creation started');
     
-    const requestBody = JSON.parse(event.body);
-    const { form_id, email, product_name, product_price } = requestBody;
+    const { 
+      form_id, 
+      email, 
+      product_name, 
+      product_price, 
+      customer_name,
+      customer_phone 
+    } = JSON.parse(event.body || '{}');
 
     // Validate required fields
     if (!form_id || !email || !product_name || !product_price) {
@@ -32,156 +45,138 @@ exports.handler = async (event, context) => {
       };
     }
 
-    // Environment variables
-    const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
-    const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
-    const SUPABASE_URL = process.env.SUPABASE_URL;
-    const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    console.log(`📦 Creating Razorpay order for: ${email}, Product: ${product_name}, Amount: ₹${product_price}`);
 
-    if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
-      throw new Error('Razorpay credentials not configured');
-    }
-
-    // Initialize Supabase
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-
-    // Get Form configuration
-    const { data: formConfig } = await supabase
+    // Get form configuration to find admin_id
+    const { data: formConfig, error: configError } = await supabase
       .from('form_configs')
-      .select('*, form_admins(*)')
+      .select('admin_id')
       .eq('form_id', form_id)
       .single();
 
-    if (!formConfig) {
-      throw new Error('Form configuration not found');
+    if (configError || !formConfig) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          success: false,
+          error: 'Form configuration not found'
+        })
+      };
     }
 
-    const formAdmin = formConfig.form_admins;
-    const totalAmount = parseFloat(product_price);
-    const amountInPaise = Math.round(totalAmount * 100);
+    const admin_id = formConfig.admin_id;
+    console.log(`👤 Form admin ID: ${admin_id}`);
 
-    // Check if Form Admin has Razorpay linked account
-    const { data: linkedAccount } = await supabase
-      .from('razorpay_linked_accounts')
+    // 🔧 FIXED: Check for provider config but allow basic Razorpay without it
+    const { data: providerConfig } = await supabase
+      .from('provider_configs')
       .select('*')
-      .eq('form_admin_id', formAdmin.id)
-      .eq('account_status', 'activated')
+      .eq('admin_id', admin_id)
+      .eq('provider_name', 'razorpay')
       .single();
 
-    if (!linkedAccount) {
-      throw new Error('Form Admin does not have an activated Razorpay account');
+    // NEW: Allow basic Razorpay orders even without provider config
+    if (!providerConfig && !process.env.RAZORPAY_KEY_ID) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          success: false,
+          error: 'Razorpay credentials not configured in environment'
+        })
+      };
     }
 
-    // Calculate commission split
-    const platformCommissionRate = 3.0; // 3%
-    const platformCommission = Math.round(totalAmount * platformCommissionRate / 100 * 100); // in paise
-    const formAdminAmount = amountInPaise - platformCommission;
+    // Check if provider config exists and is disabled
+    if (providerConfig && !providerConfig.is_enabled) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          success: false,
+          error: 'Razorpay is disabled for this form admin'
+        })
+      };
+    }
 
-    console.log('Split calculation:', {
-      totalAmount: amountInPaise,
-      platformCommission,
-      formAdminAmount,
-      formAdminAccountId: linkedAccount.razorpay_account_id
-    });
+    console.log('✅ Razorpay validation passed, creating order...');
 
-    // Create order ID
-    const orderId = `order_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-    // Razorpay order payload with transfers
-    const orderPayload = {
-      amount: amountInPaise,
+    // Create Razorpay order
+    const razorpayOrderData = {
+      amount: Math.round(product_price * 100), // Convert to paise
       currency: 'INR',
-      receipt: orderId,
-      transfers: [
-        {
-          account: linkedAccount.razorpay_account_id,
-          amount: formAdminAmount,
-          currency: 'INR',
-          on_hold: false // Instant transfer
-        }
-      ],
+      receipt: `receipt_${Date.now()}`,
       notes: {
         form_id: form_id,
-        email: email,
+        customer_email: email,
         product_name: product_name,
-        form_admin_id: formAdmin.id,
-        platform_commission: platformCommission,
-        form_admin_amount: formAdminAmount
+        admin_id: admin_id
       }
     };
 
-    console.log('Creating Razorpay order with payload:', JSON.stringify(orderPayload));
+    console.log('📤 Calling Razorpay API...');
 
-    // Create order with Razorpay
+    // Call Razorpay API
     const razorpayResponse = await fetch('https://api.razorpay.com/v1/orders', {
       method: 'POST',
       headers: {
-        'Authorization': `Basic ${Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64')}`,
+        'Authorization': `Basic ${Buffer.from(`${process.env.RAZORPAY_KEY_ID}:${process.env.RAZORPAY_KEY_SECRET}`).toString('base64')}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(orderPayload)
+      body: JSON.stringify(razorpayOrderData)
     });
 
-    const razorpayOrder = await razorpayResponse.json();
-    console.log('Razorpay order response:', razorpayOrder);
-
     if (!razorpayResponse.ok) {
-      throw new Error(`Razorpay API error: ${JSON.stringify(razorpayOrder)}`);
+      const errorText = await razorpayResponse.text();
+      console.error('❌ Razorpay API error:', razorpayResponse.status, errorText);
+      return {
+        statusCode: 500,
+        headers,
+        body: JSON.stringify({
+          success: false,
+          error: `Razorpay API error: ${errorText}`
+        })
+      };
     }
 
-    // Log transaction in database
-    const { data: transaction, error: transactionError } = await supabase
+    const razorpayOrder = await razorpayResponse.json();
+    console.log('✅ Razorpay order created:', razorpayOrder.id);
+
+    // Calculate commission (3% platform fee)
+    const platformCommission = Math.round(product_price * 0.03 * 100) / 100;
+    const netAmountToAdmin = Math.round((product_price - platformCommission) * 100) / 100;
+
+    // Log transaction to database
+    const { error: transactionError } = await supabase
       .from('transactions')
       .insert({
         form_id: form_id,
         email: email,
-        customer_name: email.split('@')[0], // Extract name from email
+        customer_name: customer_name || null,
         product_name: product_name,
-        payment_amount: totalAmount,
+        payment_amount: product_price,
         payment_currency: 'INR',
         payment_status: 'pending',
         payment_provider: 'razorpay',
         transaction_id: razorpayOrder.id,
-        razorpay_order_id: razorpayOrder.id,
-        gateway_used: 'razorpay',
-        auto_split_enabled: true,
-        split_details: {
-          platform_commission: platformCommission / 100, // store in rupees
-          form_admin_amount: formAdminAmount / 100,
-          form_admin_account_id: linkedAccount.razorpay_account_id
-        },
-        admin_id: formAdmin.id,
+        platform_commission: platformCommission,
+        net_amount_to_admin: netAmountToAdmin,
+        admin_id: admin_id,
         created_at: new Date().toISOString()
-      })
-      .select()
-      .single();
-
-    if (transactionError) {
-      console.error('Transaction logging error:', transactionError);
-      throw new Error(`Transaction logging failed: ${transactionError.message}`);
-    }
-
-    // Log split payment details
-    await supabase
-      .from('split_payment_logs')
-      .insert({
-        transaction_id: transaction.id,
-        razorpay_order_id: razorpayOrder.id,
-        total_amount: totalAmount,
-        platform_commission: platformCommission / 100,
-        gateway_fee: 0, // Razorpay handles this separately
-        form_admin_amount: formAdminAmount / 100,
-        form_admin_id: formAdmin.id,
-        platform_account_id: 'PLATFORM_MAIN', // Our platform account
-        form_admin_account_id: linkedAccount.razorpay_account_id,
-        split_status: 'pending',
-        razorpay_response: razorpayOrder
       });
 
-    console.log('Transaction logged with ID:', transaction.id);
+    if (transactionError) {
+      console.error('❌ Transaction logging error:', transactionError);
+      // Continue anyway - payment is more important than logging
+    } else {
+      console.log('✅ Transaction logged successfully');
+    }
 
-    // Create payment URL
-    const paymentUrl = `https://checkout.razorpay.com/v1/checkout.js?order_id=${razorpayOrder.id}&key_id=${RAZORPAY_KEY_ID}`;
+    // Generate payment URL
+    const paymentUrl = `https://checkout.razorpay.com/v1/checkout.js?key_id=${process.env.RAZORPAY_KEY_ID}&order_id=${razorpayOrder.id}`;
+
+    console.log('🎉 Razorpay order creation completed successfully');
 
     return {
       statusCode: 200,
@@ -189,27 +184,23 @@ exports.handler = async (event, context) => {
       body: JSON.stringify({
         success: true,
         order_id: razorpayOrder.id,
-        payment_url: paymentUrl,
-        amount: totalAmount,
+        amount: product_price,
         currency: 'INR',
-        key_id: RAZORPAY_KEY_ID,
-        split_details: {
-          platform_commission: platformCommission / 100,
-          form_admin_amount: formAdminAmount / 100
-        },
-        message: 'Order created with automatic splits'
+        payment_url: paymentUrl,
+        checkout_url: `https://razorpay.com/checkout/?order_id=${razorpayOrder.id}`,
+        message: 'Razorpay order created successfully'
       })
     };
 
   } catch (error) {
-    console.error('Error creating Razorpay order:', error);
-    
+    console.error('❌ Error creating Razorpay order:', error);
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({
         success: false,
-        error: error.message
+        error: 'Failed to create Razorpay order',
+        details: error.message
       })
     };
   }
