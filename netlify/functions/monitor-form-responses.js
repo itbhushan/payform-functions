@@ -1,459 +1,384 @@
-// netlify/functions/monitor-form-responses.js - FIXED VERSION
+// netlify/functions/monitor-form-responses.js - FIXED VERSION WITH DUPLICATE PREVENTION
 const { createClient } = require('@supabase/supabase-js');
 const { google } = require('googleapis');
+
+// In-memory tracking to prevent duplicates in same execution
+const processedInSession = new Set();
 
 exports.handler = async (event, context) => {
   console.log('=== Form Response Monitoring Started ===');
   
   try {
+    // Handle pause request
+    if (event.body) {
+      const body = JSON.parse(event.body);
+      if (body.action === 'pause_monitoring') {
+        console.log('⏸️ Monitoring paused by admin request');
+        return { statusCode: 200, body: JSON.stringify({ success: true, message: 'Monitoring paused' }) };
+      }
+    }
+
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    
+    if (!supabaseUrl || !supabaseServiceKey) {
+      throw new Error('Missing Supabase configuration');
+    }
+
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Get form configs with admin details (separate queries)
-    const { data: formConfigs, error: configError } = await supabase
+    // Get active forms for monitoring
+    const { data: forms, error: formsError } = await supabase
       .from('form_configs')
       .select(`
         *,
-        form_admins (
-          id,
-          email,
-          name
-        )
+        form_field_mappings (*)
       `)
       .eq('is_active', true);
 
-    if (configError) {
-      throw new Error(`Error fetching form configs: ${configError.message}`);
+    if (formsError) {
+      console.error('Error fetching forms:', formsError);
+      throw formsError;
     }
 
-    if (!formConfigs || formConfigs.length === 0) {
-      console.log('No active forms to monitor');
-      return { statusCode: 200, body: 'No active forms' };
-    }
+    console.log(`📋 Found ${forms?.length || 0} active forms to monitor`);
 
-    console.log(`Monitoring ${formConfigs.length} active forms`);
+    if (!forms || forms.length === 0) {
+      console.log('No active forms found');
+      return { statusCode: 200, body: JSON.stringify({ success: true, message: 'No forms to monitor' }) };
+    }
 
     // Process each form
-    for (const formConfig of formConfigs) {
+    for (const form of forms) {
       try {
-        await processFormResponses(formConfig, supabase);
+        console.log(`📝 Processing form: ${form.form_id} (Admin: ${form.admin_id})`);
+        await processFormResponses(form, supabase);
       } catch (error) {
-        console.error(`Error processing form ${formConfig.form_id}:`, error);
-        
-        // Log the error but continue with other forms
-        await supabase.from('monitoring_logs').insert({
-          activity_type: 'form_monitoring_error',
-          activity_data: {
-            form_id: formConfig.form_id,
-            error: error.message,
-            admin_id: formConfig.admin_id
-          }
-        });
+        console.error(`Error processing form ${form.form_id}:`, error);
+        continue; // Continue with next form
       }
     }
 
     console.log('=== Form Response Monitoring Completed ===');
-    return { statusCode: 200, body: 'Monitoring completed successfully' };
+    return { statusCode: 200, body: JSON.stringify({ success: true, message: 'Monitoring completed' }) };
 
   } catch (error) {
     console.error('Fatal error in monitoring:', error);
-    return { statusCode: 500, body: `Error: ${error.message}` };
+    return { 
+      statusCode: 500, 
+      body: JSON.stringify({ 
+        success: false, 
+        error: error.message 
+      }) 
+    };
   }
 };
 
 async function processFormResponses(formConfig, supabase) {
-  const { form_id, form_admins: formAdmin } = formConfig;
-  
-  console.log(`Processing form: ${form_id} (Admin: ${formAdmin.email})`);
-
-  // Get field mapping separately to avoid relationship issues
-  const { data: fieldMappings } = await supabase
-    .from('form_field_mappings')
-    .select('*')
-    .eq('form_id', form_id);
-
-  if (!fieldMappings || fieldMappings.length === 0) {
-    console.log(`No field mapping found for form ${form_id}`);
-    return;
-  }
-
-  const mapping = fieldMappings[0];
-
-  // Get Google access token for this admin
-  const { data: authToken } = await supabase
-    .from('google_auth_tokens')
-    .select('access_token, refresh_token')
-    .eq('admin_id', formAdmin.id)
-    .single();
-
-  if (!authToken) {
-    console.log(`No Google auth token for admin ${formAdmin.email}`);
-    return;
-  }
-
-  // Initialize Google Forms API
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET
-  );
-
-  oauth2Client.setCredentials({
-    access_token: authToken.access_token,
-    refresh_token: authToken.refresh_token
-  });
-
-  const forms = google.forms({ version: 'v1', auth: oauth2Client });
-
   try {
-    // Get form responses
-    const response = await forms.forms.responses.list({
-      formId: form_id
+    // Get Google OAuth token for this admin
+    const { data: authData } = await supabase
+      .from('google_oauth_tokens')
+      .select('*')
+      .eq('admin_id', formConfig.admin_id)
+      .single();
+
+    if (!authData || !authData.access_token) {
+      console.log(`❌ No OAuth token for admin ${formConfig.admin_id}`);
+      return;
+    }
+
+    // Check if token is expired
+    if (new Date(authData.expires_at) < new Date()) {
+      console.log(`❌ OAuth token expired for admin ${formConfig.admin_id}`);
+      return;
+    }
+
+    const auth = new google.auth.OAuth2();
+    auth.setCredentials({
+      access_token: authData.access_token,
+      refresh_token: authData.refresh_token
     });
 
-    const responses = response.data.responses || [];
-    console.log(`Found ${responses.length} total responses for form ${form_id}`);
+    const forms = google.forms({ version: 'v1', auth });
 
-    // Process each response
-    for (const formResponse of responses) {
-      await processIndividualResponse(formResponse, formConfig, mapping, supabase);
+    // CRITICAL FIX: Get last processed timestamp to avoid duplicates
+    const { data: lastProcessed } = await supabase
+      .from('processed_form_responses')
+      .select('response_timestamp, response_id')
+      .eq('form_id', formConfig.form_id)
+      .order('response_timestamp', { ascending: false })
+      .limit(1)
+      .single();
+
+    console.log(`📅 Last processed response timestamp:`, lastProcessed?.response_timestamp || 'None');
+
+    // Get form responses
+    const formResponse = await forms.forms.responses.list({
+      formId: formConfig.form_id,
+      // Add filter to only get responses after last processed
+      ...(lastProcessed?.response_timestamp && {
+        filter: `timestamp > "${lastProcessed.response_timestamp}"`
+      })
+    });
+
+    const responses = formResponse.data.responses || [];
+    console.log(`📋 Found ${responses.length} new responses to process`);
+
+    if (responses.length === 0) {
+      console.log('✅ No new responses to process');
+      return;
+    }
+
+    // Get field mapping
+    const fieldMapping = formConfig.form_field_mappings?.[0];
+    if (!fieldMapping) {
+      console.log(`❌ No field mapping found for form ${formConfig.form_id}`);
+      return;
+    }
+
+    console.log('📋 Field mapping being used:', fieldMapping);
+
+    // Process each response with duplicate prevention
+    for (const response of responses) {
+      try {
+        // CRITICAL FIX: Check if already processed in this session
+        const sessionKey = `${formConfig.form_id}_${response.responseId}`;
+        if (processedInSession.has(sessionKey)) {
+          console.log(`⏭️ Skipping ${response.responseId} - already processed in this session`);
+          continue;
+        }
+
+        // CRITICAL FIX: Check database for already processed responses
+        const { data: alreadyProcessed } = await supabase
+          .from('processed_form_responses')
+          .select('id')
+          .eq('form_id', formConfig.form_id)
+          .eq('response_id', response.responseId)
+          .single();
+
+        if (alreadyProcessed) {
+          console.log(`⏭️ Skipping ${response.responseId} - already processed in database`);
+          processedInSession.add(sessionKey); // Track in session too
+          continue;
+        }
+
+        console.log(`🔄 Processing new response: ${response.responseId}`);
+        await processIndividualResponse(response, formConfig, fieldMapping, supabase);
+        
+        // Mark as processed in session
+        processedInSession.add(sessionKey);
+
+      } catch (error) {
+        console.error(`Error processing response ${response.responseId}:`, error);
+        continue; // Continue with next response
+      }
     }
 
   } catch (error) {
-    if (error.code === 403) {
-      console.log(`Access denied for form ${form_id}. Admin may need to re-authorize.`);
-    } else {
-      throw error;
-    }
+    console.error('Error in processFormResponses:', error);
+    throw error;
   }
 }
 
-async function processIndividualResponse(formResponse, formConfig, mapping, supabase) {
-  const responseId = formResponse.responseId;
-  const { form_id, form_admins: formAdmin } = formConfig;
-
-  // Check if already processed
-  const { data: existingResponse } = await supabase
-    .from('processed_form_responses')
-    .select('id')
-    .eq('response_id', responseId)
-    .eq('form_id', form_id)
-    .single();
-
-  if (existingResponse) {
-    return; // Already processed
-  }
-
-  console.log(`Processing new response: ${responseId}`);
-
-  // Extract response data
-  const answers = formResponse.answers || {};
-  const responseData = extractResponseData(answers, mapping);
-
-  if (!responseData.email || !responseData.product) {
-    console.log(`Incomplete response data for ${responseId}:`, responseData);
-    return;
-  }
-
-  // Parse product details
-  const productMatch = responseData.product.match(/^(.+?)\s*-\s*₹(\d+)$/);
-  if (!productMatch) {
-    console.log(`Invalid product format: ${responseData.product}`);
-    return;
-  }
-
-  const productName = productMatch[1].trim();
-  const productPrice = parseInt(productMatch[2]);
-
-  console.log(`Creating payment for: ${responseData.email}, Product: ${productName}, Price: ₹${productPrice}`);
-
-  // 🆕 FIXED: Always use Razorpay for all payments
-  console.log('Using Razorpay for payment processing');
-  
-  let paymentResult;
-  
+async function processIndividualResponse(response, formConfig, fieldMapping, supabase) {
   try {
-    // Create Razorpay order
-    paymentResult = await createRazorpayOrder({
-      form_id,
-      email: responseData.email,
-      product_name: productName,
-      product_price: productPrice,
-      customer_name: responseData.name,
-      phone: responseData.phone
-    });
-
-    if (paymentResult.success) {
-      // Calculate commission (3% platform fee)
-      const platformCommission = productPrice * 0.03;
-      const netAmountToAdmin = productPrice - platformCommission;
-      
-      // Mark response as processed
-      await supabase.from('processed_form_responses').insert({
-        response_id: responseId,
-        form_id: form_id,
-        order_id: paymentResult.order_id,
-        payment_provider: 'razorpay',
+    // CRITICAL FIX: Mark as being processed IMMEDIATELY to prevent race conditions
+    const processingKey = `processing_${formConfig.form_id}_${response.responseId}`;
+    
+    // Insert processing record immediately
+    const { error: processingError } = await supabase
+      .from('processed_form_responses')
+      .insert({
+        form_id: formConfig.form_id,
+        response_id: response.responseId,
+        admin_id: formConfig.admin_id,
+        response_timestamp: response.lastSubmittedTime,
+        processing_status: 'processing', // Mark as processing
         processed_at: new Date().toISOString()
       });
 
-      // 🆕 CRITICAL: Log transaction to database
-      const { error: transactionError } = await supabase.from('transactions').insert({
-        form_id: form_id,
-        email: responseData.email,
-        customer_name: responseData.name,
-        product_name: productName,
-        payment_amount: productPrice,
-        payment_currency: paymentResult.currency || 'INR',
-        payment_status: 'pending',
-        payment_provider: 'razorpay',
-        transaction_id: paymentResult.order_id,
-        gateway_fee: 0, // Will be updated when payment completes
-        platform_commission: platformCommission,
-        net_amount_to_admin: netAmountToAdmin,
-        admin_id: formConfig.admin_id,
-        created_at: new Date().toISOString()
-      });
+    if (processingError) {
+      // If we can't mark as processing, it might already be processed
+      console.log(`⚠️ Could not mark as processing (might be duplicate):`, processingError.message);
+      return;
+    }
+
+    console.log(`🔒 Marked ${response.responseId} as processing`);
+
+    // Extract data from form response
+    const extractedData = extractFormData(response, fieldMapping);
+    
+    if (!extractedData.email) {
+      console.log(`❌ No email found in response ${response.responseId}`);
+      await updateProcessingStatus(supabase, formConfig.form_id, response.responseId, 'failed', 'No email found');
+      return;
+    }
+
+    console.log('📊 Extracted data:', extractedData);
+
+    // Create payment with extracted data
+    console.log(`💳 Creating Razorpay payment for: ${extractedData.email}`);
+    
+    const paymentResult = await createRazorpayOrder({
+      form_id: formConfig.form_id,
+      email: extractedData.email,
+      product_name: extractedData.productName,
+      product_price: extractedData.productPrice,
+      customer_name: extractedData.name,
+      phone: extractedData.phone || ''
+    });
+
+    if (paymentResult.success) {
+      console.log(`✅ Payment created successfully: ${paymentResult.order_id}`);
+      
+      // Log transaction to database
+      const { error: transactionError } = await supabase
+        .from('transactions')
+        .insert({
+          form_id: formConfig.form_id,
+          email: extractedData.email,
+          customer_name: extractedData.name,
+          product_name: extractedData.productName,
+          payment_amount: extractedData.productPrice,
+          payment_currency: 'INR',
+          payment_status: 'pending',
+          payment_provider: 'razorpay',
+          transaction_id: paymentResult.order_id,
+          admin_id: formConfig.admin_id,
+          phone: extractedData.phone,
+          created_at: new Date().toISOString()
+        });
 
       if (transactionError) {
-        console.error('❌ Failed to log transaction:', transactionError);
+        console.error('❌ Error logging transaction:', transactionError);
       } else {
         console.log('✅ Transaction logged to database');
       }
 
-      // Send email notification
-      await sendPaymentEmail({
-        email: responseData.email,
-        name: responseData.name,
-        product_name: productName,
-        product_price: productPrice,
-        payment_url: paymentResult.payment_url,
-        order_id: paymentResult.order_id
-      });
+      // Update processing status to completed
+      await updateProcessingStatus(supabase, formConfig.form_id, response.responseId, 'completed', null, paymentResult.order_id);
 
-      console.log(`✅ Razorpay payment created successfully: ${paymentResult.order_id}`);
-
-      // Log successful processing
-      await supabase.from('monitoring_logs').insert({
-        activity_type: 'payment_created',
-        activity_data: {
-          response_id: responseId,
-          form_id: form_id,
-          email: responseData.email,
-          product_name: productName,
-          amount: productPrice,
-          gateway: 'razorpay',
-          order_id: paymentResult.order_id
-        }
-      });
-
+      // Send email (placeholder - implement actual email sending)
+      console.log(`📧 Would send payment email to: ${extractedData.email}`);
+      console.log(`🔗 Payment URL: ${paymentResult.payment_url}`);
+      
     } else {
-      throw new Error(paymentResult.error || 'Payment creation failed');
+      console.error(`❌ Payment creation failed:`, paymentResult.error);
+      await updateProcessingStatus(supabase, formConfig.form_id, response.responseId, 'failed', paymentResult.error);
     }
 
   } catch (error) {
-    console.error(`Error creating payment for response ${responseId}:`, error);
-    
-    // Log the error
-    await supabase.from('monitoring_logs').insert({
-      activity_type: 'payment_creation_error',
-      activity_data: {
-        response_id: responseId,
-        form_id: form_id,
-        email: responseData.email,
-        error: error.message,
-        gateway: 'razorpay'
-      }
-    });
-    
-    throw error; // Re-throw to trigger error handling in parent function
+    console.error('Error in processIndividualResponse:', error);
+    // Mark as failed
+    await updateProcessingStatus(supabase, formConfig.form_id, response.responseId, 'failed', error.message);
+    throw error;
   }
 }
 
-function extractResponseData(answers, mapping) {
-  // DEBUG: Log the actual response structure
-  console.log('=== DEBUG: Response Structure ===');
-  console.log('Available answer keys:', Object.keys(answers));
-  console.log('Field mapping being used:', JSON.stringify(mapping, null, 2));
-  console.log('First answer sample:', JSON.stringify(Object.values(answers)[0], null, 2));
-  
-  const data = {
+async function updateProcessingStatus(supabase, formId, responseId, status, errorMessage = null, orderId = null) {
+  try {
+    const { error } = await supabase
+      .from('processed_form_responses')
+      .update({
+        processing_status: status,
+        error_message: errorMessage,
+        order_id: orderId,
+        updated_at: new Date().toISOString()
+      })
+      .eq('form_id', formId)
+      .eq('response_id', responseId);
+
+    if (error) {
+      console.error('Error updating processing status:', error);
+    } else {
+      console.log(`📝 Updated processing status to: ${status}`);
+    }
+  } catch (error) {
+    console.error('Error in updateProcessingStatus:', error);
+  }
+}
+
+function extractFormData(response, fieldMapping) {
+  const answers = response.answers || {};
+  let extractedData = {
     email: '',
-    product: '',
+    productName: '',
+    productPrice: 0,
     name: '',
     phone: ''
   };
 
-  // Enhanced extraction that handles multiple ID formats
-  const answerKeys = Object.keys(answers);
-  
-  // Try to extract email
-  data.email = extractFieldValue(answers, mapping.email_field_id, answerKeys) || '';
-  
-  // Try to extract product
-  data.product = extractFieldValue(answers, mapping.product_field_id, answerKeys) || '';
-  
-  // Try to extract name
-  data.name = extractFieldValue(answers, mapping.name_field_id, answerKeys) || '';
-  
-  // Try to extract phone
-  data.phone = extractFieldValue(answers, mapping.phone_field_id, answerKeys) || '';
-
-  // If still empty, try intelligent field detection
-  if (!data.email || !data.product) {
-    console.log('Trying intelligent field detection...');
-    const intelligentData = intelligentFieldDetection(answers, answerKeys);
-    if (intelligentData.email) data.email = intelligentData.email;
-    if (intelligentData.product) data.product = intelligentData.product;
-    if (intelligentData.name) data.name = intelligentData.name;
+  // First try to find data using field mapping
+  if (fieldMapping.email_field_id && answers[fieldMapping.email_field_id]) {
+    extractedData.email = answers[fieldMapping.email_field_id].textAnswers?.answers?.[0]?.value || '';
   }
 
-  console.log('Extracted data:', data);
-  return data;
-}
-
-// Helper function to extract field value with multiple ID format support
-function extractFieldValue(answers, fieldId, answerKeys) {
-  if (!fieldId) return '';
-  
-  // Method 1: Direct match (for questionId format)
-  if (answers[fieldId]) {
-    return answers[fieldId].textAnswers?.answers?.[0]?.value || '';
+  if (fieldMapping.product_field_id && answers[fieldMapping.product_field_id]) {
+    const productText = answers[fieldMapping.product_field_id].textAnswers?.answers?.[0]?.value || '';
+    const productMatch = productText.match(/^(.+?)\s*-\s*₹(\d+)$/);
+    if (productMatch) {
+      extractedData.productName = productMatch[1].trim();
+      extractedData.productPrice = parseInt(productMatch[2]);
+    }
   }
-  
-  // Method 2: Try numeric index (for 0,1,2 format)
-  if (!isNaN(fieldId) && answerKeys[parseInt(fieldId)]) {
-    const key = answerKeys[parseInt(fieldId)];
-    return answers[key].textAnswers?.answers?.[0]?.value || '';
+
+  if (fieldMapping.name_field_id && answers[fieldMapping.name_field_id]) {
+    extractedData.name = answers[fieldMapping.name_field_id].textAnswers?.answers?.[0]?.value || '';
   }
-  
-  // Method 3: Entry-based lookup - just log for debugging
-  console.log(`Could not find field for ID: ${fieldId}`);
-  return '';
+
+  if (fieldMapping.phone_field_id && answers[fieldMapping.phone_field_id]) {
+    extractedData.phone = answers[fieldMapping.phone_field_id].textAnswers?.answers?.[0]?.value || '';
+  }
+
+  // Intelligent fallback if field mapping failed
+  if (!extractedData.email || !extractedData.productName) {
+    console.log('🔍 Field mapping failed, trying intelligent detection...');
+    
+    for (const [questionId, answer] of Object.entries(answers)) {
+      const value = answer.textAnswers?.answers?.[0]?.value || '';
+      
+      if (!extractedData.email && value.includes('@')) {
+        extractedData.email = value;
+      }
+      
+      if (!extractedData.productName && value.includes('₹')) {
+        const productMatch = value.match(/^(.+?)\s*-\s*₹(\d+)$/);
+        if (productMatch) {
+          extractedData.productName = productMatch[1].trim();
+          extractedData.productPrice = parseInt(productMatch[2]);
+        }
+      }
+      
+      if (!extractedData.name && value.length > 0 && !value.includes('@') && !value.includes('₹')) {
+        extractedData.name = value;
+      }
+    }
+  }
+
+  console.log('📊 Final extracted data:', extractedData);
+  return extractedData;
 }
 
-// Intelligent field detection based on content patterns
-function intelligentFieldDetection(answers, answerKeys) {
-  const result = { email: '', product: '', name: '' };
-  
-  answerKeys.forEach(key => {
-    const value = answers[key].textAnswers?.answers?.[0]?.value || '';
-    
-    // Email detection
-    if (value.includes('@') && !result.email) {
-      result.email = value;
-    }
-    
-    // Product detection (contains currency symbol)
-    if (value.includes('₹') && !result.product) {
-      result.product = value;
-    }
-    
-    // Name detection (basic heuristic)
-    if (!result.name && value.length > 2 && value.length < 50 && 
-        !value.includes('@') && !value.includes('₹') && !value.includes('+')) {
-      result.name = value;
-    }
-  });
-  
-  return result;
-}
-
-// Create Razorpay order using your working function
 async function createRazorpayOrder(orderData) {
   try {
-    console.log('🔄 Calling create-razorpay-order function...');
+    console.log('💳 Creating Razorpay order with data:', orderData);
     
-    const response = await fetch(`${process.env.URL}/.netlify/functions/create-razorpay-order`, {
+    // Call your existing create-razorpay-order function
+    const response = await fetch(`${process.env.URL || 'https://payform2025.netlify.app'}/.netlify/functions/create-razorpay-order`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json'
+      },
       body: JSON.stringify(orderData)
     });
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
     const result = await response.json();
-    console.log('🔄 Razorpay order result:', result);
+    console.log('💳 Razorpay order result:', result);
     
-    if (result.success) {
-      return {
-        success: true,
-        order_id: result.order_id,
-        payment_url: result.payment_url,
-        amount: result.amount,
-        currency: result.currency
-      };
-    } else {
-      throw new Error(result.error || 'Unknown error from Razorpay function');
-    }
+    return result;
   } catch (error) {
-    console.error('❌ Razorpay order creation failed:', error);
+    console.error('Error creating Razorpay order:', error);
     return { success: false, error: error.message };
-  }
-}
-
-// Send payment email with Razorpay branding
-async function sendPaymentEmail({ email, name, product_name, product_price, payment_url, order_id }) {
-  try {
-    console.log(`📧 Sending Razorpay payment email to: ${email}`);
-    
-    const emailContent = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="text-align: center; margin-bottom: 30px;">
-          <h2 style="color: #528FF0;">Complete Your Payment</h2>
-        </div>
-        
-        <p>Hello ${name || 'Customer'},</p>
-        <p>Thank you for your submission! Please complete your payment by clicking the button below:</p>
-        
-        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #528FF0;">
-          <h3 style="margin: 0 0 15px 0; color: #495057;">Order Summary</h3>
-          <p style="margin: 5px 0;"><strong>Product:</strong> ${product_name}</p>
-          <p style="margin: 5px 0;"><strong>Amount:</strong> ₹${product_price}</p>
-          <p style="margin: 5px 0;"><strong>Order ID:</strong> ${order_id}</p>
-        </div>
-        
-        <div style="text-align: center; margin: 30px 0;">
-          <a href="${payment_url}" 
-             style="background: #528FF0; color: white; padding: 15px 30px; 
-                    text-decoration: none; border-radius: 5px; font-size: 16px; 
-                    display: inline-block;">
-            💳 Pay ₹${product_price} Securely
-          </a>
-        </div>
-
-        <div style="background: #e7f3ff; padding: 15px; border-radius: 5px; margin: 20px 0;">
-          <p style="margin: 0; font-size: 14px; color: #0066cc;">
-            🔒 <strong>Secure Payment via Razorpay</strong><br>
-            Your payment is processed securely with bank-level encryption.
-          </p>
-        </div>
-
-        <p style="font-size: 14px; color: #666;">
-          If you have any questions or need assistance, please reply to this email.
-        </p>
-        
-        <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-        
-        <p style="font-size: 12px; color: #999; text-align: center;">
-          This email was sent by PayForm. Powered by Razorpay payments.
-        </p>
-      </div>
-    `;
-
-    // Note: You'll need to implement actual email sending here
-    // This could be via Gmail API, SendGrid, or your preferred email service
-    console.log('📧 Email content prepared for:', email);
-    console.log('📧 Email HTML preview prepared');
-    
-    // TODO: Implement actual email sending
-    // Example: await gmailAPI.sendEmail(email, subject, emailContent);
-    
-    return true;
-  } catch (error) {
-    console.error('❌ Email sending failed:', error);
-    return false;
   }
 }
