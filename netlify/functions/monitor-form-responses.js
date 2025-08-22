@@ -1,4 +1,4 @@
-// netlify/functions/monitor-form-responses.js - FIXED VERSION USING SUPABASE EMAIL (NO SMTP NEEDED)
+// netlify/functions/monitor-form-responses.js - FIXED TO USE ADMIN OAUTH TOKENS
 const { createClient } = require('@supabase/supabase-js');
 const { google } = require('googleapis');
 
@@ -24,7 +24,6 @@ const sendPaymentEmail = async (customerEmail, customerName, productName, produc
   try {
     console.log(`📧 Sending payment email to ${customerEmail} using Supabase Edge Function`);
 
-    // Use the SAME email system as CashFree
     const emailResponse = await fetch(`${process.env.SUPABASE_URL}/functions/v1/send-payment-email`, {
       method: 'POST',
       headers: {
@@ -34,16 +33,12 @@ const sendPaymentEmail = async (customerEmail, customerName, productName, produc
       body: JSON.stringify({
         to: customerEmail,
         subject: `Complete Your Payment - ${productName}`,
-        customerName: customerName,
+        paymentLink: paymentUrl,
         productName: productName,
         amount: productPrice,
-        paymentUrl: paymentUrl,
-        orderId: orderId,
+        customerName: customerName,
         adminId: adminId,
-        
-        // Email type for payment link (not confirmation)
-        isConfirmation: false,
-        emailType: 'payment_link'
+        isConfirmation: false
       })
     });
 
@@ -51,7 +46,7 @@ const sendPaymentEmail = async (customerEmail, customerName, productName, produc
     console.log('📧 Supabase Email API response:', emailResult);
     
     if (emailResult.success) {
-      console.log(`✅ Payment email sent to ${customerEmail} (Type: ${emailResult.emailType || 'payment_link'})`);
+      console.log(`✅ Payment email sent to ${customerEmail}`);
       return { success: true, messageId: emailResult.messageId };
     } else {
       console.error(`❌ Failed to send payment email:`, emailResult.error);
@@ -96,6 +91,75 @@ const extractFormData = (response) => {
   });
 
   return { email, name: name || 'Customer', product, productPrice };
+};
+
+// Initialize Google Forms API with admin's OAuth token
+const initGoogleAuthForAdmin = async (adminId) => {
+  try {
+    console.log(`🔐 Initializing Google auth for admin: ${adminId}`);
+
+    // Get admin's stored OAuth tokens
+    const { data: tokenData, error: tokenError } = await supabase
+      .from('google_auth_tokens')
+      .select('access_token, refresh_token, token_expires_at')
+      .eq('admin_id', adminId)
+      .single();
+
+    if (tokenError || !tokenData) {
+      throw new Error(`No Google OAuth tokens found for admin ${adminId}`);
+    }
+
+    console.log('✅ Found OAuth tokens for admin');
+
+    // Check if token is expired
+    const now = new Date();
+    const expiresAt = new Date(tokenData.token_expires_at);
+
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      `${process.env.URL}/.netlify/functions/google-oauth-callback`
+    );
+
+    if (expiresAt <= now) {
+      console.log('⚠️ Access token expired, refreshing...');
+      
+      if (!tokenData.refresh_token) {
+        throw new Error('Token expired and no refresh token available');
+      }
+
+      oauth2Client.setCredentials({
+        refresh_token: tokenData.refresh_token
+      });
+
+      const { credentials } = await oauth2Client.refreshAccessToken();
+      console.log('✅ Token refreshed successfully');
+
+      // Update database with new token
+      await supabase
+        .from('google_auth_tokens')
+        .update({
+          access_token: credentials.access_token,
+          token_expires_at: new Date(credentials.expiry_date).toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('admin_id', adminId);
+
+      console.log('✅ Updated token in database');
+    } else {
+      console.log('✅ Using valid OAuth token');
+      oauth2Client.setCredentials({ 
+        access_token: tokenData.access_token,
+        refresh_token: tokenData.refresh_token
+      });
+    }
+
+    return oauth2Client;
+
+  } catch (error) {
+    console.error(`❌ Error initializing Google auth for admin ${adminId}:`, error);
+    throw error;
+  }
 };
 
 // Main monitoring function
@@ -155,14 +219,6 @@ exports.handler = async (event, context) => {
 
     console.log(`📋 Found ${activeForms.length} active forms to monitor`);
 
-    // Initialize Google Forms API
-    const auth = new google.auth.GoogleAuth({
-      credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON),
-      scopes: ['https://www.googleapis.com/auth/forms.responses.readonly']
-    });
-
-    const forms = google.forms({ version: 'v1', auth });
-
     let totalProcessed = 0;
     let emailsSent = 0;
     let errors = 0;
@@ -171,6 +227,10 @@ exports.handler = async (event, context) => {
     for (const form of activeForms) {
       try {
         console.log(`🔍 Checking form: ${form.form_name} (${form.form_id})`);
+
+        // Initialize Google Forms API with admin's OAuth token
+        const authClient = await initGoogleAuthForAdmin(form.admin_id);
+        const forms = google.forms({ version: 'v1', auth: authClient });
 
         // Get form responses from Google Forms API
         const formResponses = await forms.forms.responses.list({
@@ -320,6 +380,14 @@ exports.handler = async (event, context) => {
 
       } catch (formError) {
         console.error(`❌ Error processing form ${form.form_name}:`, formError);
+        
+        // Log specific error types
+        if (formError.message.includes('No Google OAuth tokens')) {
+          console.error(`❌ Admin ${form.admin_id} needs to reconnect Google account`);
+        } else if (formError.message.includes('Token expired')) {
+          console.error(`❌ Admin ${form.admin_id} OAuth token expired and refresh failed`);
+        }
+        
         errors++;
       }
     } // End form processing loop
