@@ -1,4 +1,10 @@
-// netlify/functions/payment-page.js - Serves Cashfree payment HTML page
+// netlify/functions/payment-page.js - Updated for Razorpay Payment Processing
+const { createClient } = require('@supabase/supabase-js');
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 exports.handler = async (event, context) => {
   const headers = {
@@ -9,220 +15,348 @@ exports.handler = async (event, context) => {
 
   try {
     // Extract parameters from URL
-    const { session, amount, product, order } = event.queryStringParameters || {};
+    const { order_id, email, amount, product_name, form_id } = event.queryStringParameters || {};
 
-    if (!session || !amount || !order) {
+    console.log('📄 Payment page requested:', { order_id, email, amount, product_name });
+
+    // Validate required parameters
+    if (!order_id) {
       return {
         statusCode: 400,
         headers,
-        body: '<h1>Invalid payment link</h1><p>Missing required parameters.</p>'
+        body: generateErrorPage('Missing order ID')
       };
     }
 
-    // Generate the payment HTML page
-    const paymentHtml = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Complete Your Payment - PayForm</title>
-    <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            margin: 0;
-            padding: 20px;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .payment-container {
-            background: white;
-            padding: 40px;
-            border-radius: 15px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            max-width: 500px;
-            text-align: center;
-        }
-        .logo { font-size: 48px; margin-bottom: 20px; }
-        .amount { 
-            background: #e8f5e8; 
-            padding: 20px; 
-            border-radius: 10px; 
-            margin: 20px 0; 
-            border-left: 4px solid #4caf50; 
-        }
-        .pay-button {
-            background: #4caf50;
-            color: white;
-            padding: 15px 30px;
-            border: none;
-            border-radius: 8px;
-            font-size: 18px;
-            font-weight: bold;
-            cursor: pointer;
-            transition: background 0.3s;
-            width: 100%;
-            margin-top: 20px;
-        }
-        .pay-button:hover {
-            background: #45a049;
-        }
-        .loading {
-            display: none;
-            color: #666;
-            margin-top: 15px;
-        }
-        .error {
-            background: #ffebee;
-            color: #c62828;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 15px 0;
-            display: none;
-        }
-    </style>
-</head>
-<body>
-    <div class="payment-container">
-        <div class="logo">💳</div>
-        <h1 style="color: #333; margin-bottom: 10px;">Complete Your Payment</h1>
-        <p style="color: #666;">You will be redirected to Cashfree's secure payment gateway</p>
-        
-        <div class="amount">
-            <p style="margin: 5px 0;"><strong>Product:</strong> ${decodeURIComponent(product || 'Product')}</p>
-            <p style="margin: 5px 0;"><strong>Amount:</strong> ₹${amount}</p>
-            <p style="margin: 5px 0;"><strong>Order ID:</strong> ${order}</p>
-        </div>
+    // Fetch order details from database
+    const { data: transaction, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('razorpay_order_id', order_id)
+      .single();
 
-        <div id="error" class="error">
-            <p><strong>Payment Error:</strong> <span id="errorMessage"></span></p>
-            <button onclick="location.reload()" style="margin-top: 10px; padding: 8px 16px; background: #c62828; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                Try Again
-            </button>
-        </div>
+    if (error || !transaction) {
+      console.error('❌ Transaction not found:', error);
+      return {
+        statusCode: 404,
+        headers,
+        body: generateErrorPage('Transaction not found')
+      };
+    }
 
-        <button id="payNowBtn" class="pay-button" onclick="initiatePayment()">
-            Pay ₹${amount} Securely
-        </button>
-        
-        <div id="loading" class="loading">
-            <p>Redirecting to payment gateway...</p>
-            <div style="margin-top: 10px;">
-                <div style="width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #4caf50; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto;"></div>
-            </div>
-        </div>
-        
-        <p style="color: #999; font-size: 12px; margin-top: 20px;">
-            🔒 Secured by Cashfree Payments
-        </p>
-    </div>
+    console.log('✅ Transaction found:', transaction.id);
 
-    <script>
-        // Initialize Cashfree SDK
-        let cashfree;
-        
-        async function initializeCashfree() {
-            try {
-                cashfree = Cashfree({
-                    mode: "sandbox", // Change to "production" for live environment
-                });
-                console.log('Cashfree SDK initialized successfully');
-                return true;
-            } catch (error) {
-                console.error('Failed to initialize Cashfree SDK:', error);
-                return false;
-            }
-        }
-
-        async function initiatePayment() {
-            const payBtn = document.getElementById('payNowBtn');
-            const loading = document.getElementById('loading');
-            const errorDiv = document.getElementById('error');
-            const errorMsg = document.getElementById('errorMessage');
-            
-            // Hide previous states
-            payBtn.style.display = 'none';
-            loading.style.display = 'block';
-            errorDiv.style.display = 'none';
-            
-            try {
-                // Initialize SDK if not already done
-                if (!cashfree) {
-                    const initialized = await initializeCashfree();
-                    if (!initialized) {
-                        throw new Error('Failed to initialize payment system');
-                    }
-                }
-                
-                let checkoutOptions = {
-                    paymentSessionId: "${session}",
-                    redirectTarget: "_self",
-                };
-                
-                console.log('Initiating checkout with session:', "${session}");
-                
-                const result = await cashfree.checkout(checkoutOptions);
-                
-                if (result.error) {
-                    throw new Error(result.error.message || 'Payment initialization failed');
-                }
-                
-                // If we reach here without redirect, something went wrong
-                console.log('Checkout result:', result);
-                
-            } catch (error) {
-                console.error('Payment error:', error);
-                
-                // Show error to user
-                errorMsg.textContent = error.message || 'Unable to connect to payment gateway';
-                errorDiv.style.display = 'block';
-                loading.style.display = 'none';
-                payBtn.style.display = 'block';
-            }
-        }
-        
-        // Auto-initiate payment after page loads
-        window.addEventListener('load', function() {
-            // Initialize SDK first
-            initializeCashfree().then(function(success) {
-                if (success) {
-                    // Auto-start payment after 2 seconds
-                    setTimeout(initiatePayment, 2000);
-                } else {
-                    document.getElementById('errorMessage').textContent = 'Failed to load payment system';
-                    document.getElementById('error').style.display = 'block';
-                    document.getElementById('loading').style.display = 'none';
-                }
-            });
-        });
-    </script>
-    
-    <style>
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-    </style>
-</body>
-</html>
-    `;
+    // Generate payment page with Razorpay integration
+    const paymentPage = generateRazorpayPaymentPage({
+      orderId: order_id,
+      amount: transaction.payment_amount,
+      currency: transaction.payment_currency || 'INR',
+      email: transaction.email,
+      customerName: transaction.customer_name || 'Customer',
+      productName: transaction.product_name || 'Product',
+      formId: transaction.form_id,
+      transactionId: transaction.id
+    });
 
     return {
       statusCode: 200,
       headers,
-      body: paymentHtml
+      body: paymentPage
     };
 
   } catch (error) {
-    console.error('Payment page error:', error);
+    console.error('❌ Payment page error:', error);
     return {
       statusCode: 500,
       headers,
-      body: '<h1>Error</h1><p>Unable to load payment page. Please try again.</p>'
+      body: generateErrorPage('Internal server error')
     };
   }
 };
+
+function generateRazorpayPaymentPage(orderData) {
+  const { orderId, amount, currency, email, customerName, productName, formId, transactionId } = orderData;
+  
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Complete Payment - PayForm</title>
+        <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+        <style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                margin: 0;
+                padding: 20px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .payment-container {
+                background: white;
+                padding: 40px;
+                border-radius: 15px;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                max-width: 500px;
+                text-align: center;
+                width: 100%;
+            }
+            .logo {
+                font-size: 48px;
+                margin-bottom: 20px;
+            }
+            .amount {
+                background: #f8f9ff;
+                padding: 20px;
+                border-radius: 10px;
+                margin: 20px 0;
+                border-left: 4px solid #3b82f6;
+            }
+            .btn-pay {
+                background: #3b82f6;
+                color: white;
+                border: none;
+                padding: 15px 30px;
+                border-radius: 8px;
+                font-size: 16px;
+                font-weight: 600;
+                cursor: pointer;
+                width: 100%;
+                margin: 20px 0;
+                transition: background 0.3s;
+            }
+            .btn-pay:hover {
+                background: #2563eb;
+            }
+            .btn-pay:disabled {
+                background: #9ca3af;
+                cursor: not-allowed;
+            }
+            .security-info {
+                background: #f0f9ff;
+                padding: 15px;
+                border-radius: 8px;
+                margin: 20px 0;
+                font-size: 14px;
+                color: #0369a1;
+            }
+            .loading {
+                display: none;
+                font-size: 14px;
+                color: #6b7280;
+                margin-top: 10px;
+            }
+            .error {
+                display: none;
+                background: #fef2f2;
+                color: #dc2626;
+                padding: 15px;
+                border-radius: 8px;
+                margin: 15px 0;
+                border-left: 4px solid #dc2626;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="payment-container">
+            <div class="logo">💳</div>
+            <h1 style="color: #1f2937; margin-bottom: 10px;">Complete Your Payment</h1>
+            <p style="color: #6b7280; margin-bottom: 30px;">Secure payment powered by Razorpay</p>
+            
+            <div class="amount">
+                <h3 style="margin: 0; color: #1f2937;">Order Summary</h3>
+                <p style="margin: 10px 0 5px 0;"><strong>Product:</strong> ${productName}</p>
+                <p style="margin: 5px 0;"><strong>Customer:</strong> ${customerName}</p>
+                <p style="margin: 5px 0;"><strong>Email:</strong> ${email}</p>
+                <p style="margin: 10px 0 0 0; font-size: 24px; font-weight: bold; color: #3b82f6;">
+                    ₹${amount}
+                </p>
+            </div>
+
+            <button id="payButton" class="btn-pay" onclick="startPayment()">
+                🔒 Pay ₹${amount} Securely
+            </button>
+
+            <div id="loading" class="loading">
+                Processing payment... Please wait
+            </div>
+
+            <div id="error" class="error">
+                Payment failed. Please try again or contact support.
+            </div>
+
+            <div class="security-info">
+                🔒 Your payment is secured with 256-bit SSL encryption.<br>
+                All transactions are processed securely by Razorpay.
+            </div>
+
+            <p style="color: #9ca3af; font-size: 12px; margin-top: 30px;">
+                Order ID: ${orderId}<br>
+                PayForm - Secure Payment Processing
+            </p>
+        </div>
+
+        <script>
+            const RAZORPAY_KEY = '${process.env.RAZORPAY_KEY_ID}'; // Your Razorpay Key ID
+            
+            let paymentInProgress = false;
+
+            function startPayment() {
+                if (paymentInProgress) return;
+                
+                paymentInProgress = true;
+                document.getElementById('payButton').disabled = true;
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('error').style.display = 'none';
+
+                const options = {
+                    key: RAZORPAY_KEY,
+                    amount: ${amount * 100}, // Convert to paise
+                    currency: '${currency}',
+                    name: 'PayForm',
+                    description: '${productName}',
+                    order_id: '${orderId}',
+                    prefill: {
+                        name: '${customerName}',
+                        email: '${email}',
+                        contact: ''
+                    },
+                    theme: {
+                        color: '#3b82f6'
+                    },
+                    handler: function(response) {
+                        console.log('✅ Payment successful:', response);
+                        handlePaymentSuccess(response);
+                    },
+                    modal: {
+                        ondismiss: function() {
+                            console.log('⚠️ Payment cancelled by user');
+                            resetPaymentButton();
+                        }
+                    }
+                };
+
+                try {
+                    const razorpay = new Razorpay(options);
+                    
+                    razorpay.on('payment.failed', function(response) {
+                        console.error('❌ Payment failed:', response.error);
+                        handlePaymentFailure(response.error);
+                    });
+
+                    razorpay.open();
+                } catch (error) {
+                    console.error('❌ Razorpay initialization error:', error);
+                    handlePaymentFailure({ description: 'Payment initialization failed' });
+                }
+            }
+
+            function handlePaymentSuccess(response) {
+                document.getElementById('loading').innerHTML = 'Payment successful! Verifying...';
+                
+                // Verify payment on server
+                fetch('/.netlify/functions/verify-razorpay-payment', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        razorpay_payment_id: response.razorpay_payment_id,
+                        razorpay_order_id: response.razorpay_order_id,
+                        razorpay_signature: response.razorpay_signature,
+                        transaction_id: '${transactionId}',
+                        form_id: '${formId}',
+                        email: '${email}'
+                    })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        window.location.href = data.redirect_url || '/?payment=success';
+                    } else {
+                        throw new Error(data.message || 'Verification failed');
+                    }
+                })
+                .catch(error => {
+                    console.error('❌ Verification error:', error);
+                    document.getElementById('error').innerHTML = 
+                        'Payment completed but verification failed. Please contact support with Order ID: ${orderId}';
+                    document.getElementById('error').style.display = 'block';
+                    document.getElementById('loading').style.display = 'none';
+                });
+            }
+
+            function handlePaymentFailure(error) {
+                console.error('❌ Payment failed:', error);
+                document.getElementById('error').innerHTML = 
+                    \`Payment failed: \${error.description || 'Unknown error'}. Please try again.\`;
+                document.getElementById('error').style.display = 'block';
+                resetPaymentButton();
+            }
+
+            function resetPaymentButton() {
+                paymentInProgress = false;
+                document.getElementById('payButton').disabled = false;
+                document.getElementById('loading').style.display = 'none';
+            }
+
+            // Auto-start payment when page loads (optional)
+            // window.onload = function() {
+            //     setTimeout(startPayment, 1000);
+            // };
+        </script>
+    </body>
+    </html>
+  `;
+}
+
+function generateErrorPage(message) {
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Payment Error - PayForm</title>
+        <style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                margin: 0;
+                padding: 40px;
+                background: #f8fafc;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 100vh;
+            }
+            .error-container {
+                background: white;
+                padding: 40px;
+                border-radius: 10px;
+                max-width: 500px;
+                text-align: center;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            }
+            .error-icon {
+                font-size: 64px;
+                margin-bottom: 20px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="error-container">
+            <div class="error-icon">❌</div>
+            <h2 style="color: #dc2626; margin-bottom: 10px;">Payment Error</h2>
+            <p style="color: #6b7280; margin-bottom: 30px;">${message}</p>
+            <p style="color: #9ca3af; font-size: 14px;">
+                Please contact support if this issue persists.
+            </p>
+        </div>
+    </body>
+    </html>
+  `;
+}
