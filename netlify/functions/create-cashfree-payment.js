@@ -73,7 +73,6 @@ exports.handler = async (event, context) => {
     try {
       // Get form config with admin preferences
 // Get form config (separate query to avoid relationship issues)
-let formConfig;
 const { data: formConfig, error: configError } = await supabase
   .from('form_configs')
   .select('*')
