@@ -255,40 +255,23 @@ function generateRazorpayPaymentPage(orderData) {
                 }
             }
 
-            function handlePaymentSuccess(response) {
-                document.getElementById('loading').innerHTML = 'Payment successful! Verifying...';
-                
-                // Verify payment on server
-                fetch('/.netlify/functions/verify-razorpay-payment', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        razorpay_payment_id: response.razorpay_payment_id,
-                        razorpay_order_id: response.razorpay_order_id,
-                        razorpay_signature: response.razorpay_signature,
-                        transaction_id: '${transactionId}',
-                        form_id: '${formId}',
-                        email: '${email}'
-                    })
-                })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        window.location.href = data.redirect_url || '/?payment=success';
-                    } else {
-                        throw new Error(data.message || 'Verification failed');
-                    }
-                })
-                .catch(error => {
-                    console.error('❌ Verification error:', error);
-                    document.getElementById('error').innerHTML = 
-                        'Payment completed but verification failed. Please contact support with Order ID: ${orderId}';
-                    document.getElementById('error').style.display = 'block';
-                    document.getElementById('loading').style.display = 'none';
-                });
-            }
+function handlePaymentSuccess(response) {
+    document.getElementById('loading').innerHTML = 'Payment successful! Verifying...';
+    
+    // Build query parameters for verification (matching your verify function)
+    const verifyUrl = `/.netlify/functions/verify-razorpay-payment?` +
+        `razorpay_payment_id=${encodeURIComponent(response.razorpay_payment_id)}&` +
+        `razorpay_order_id=${encodeURIComponent(response.razorpay_order_id)}&` +
+        `razorpay_signature=${encodeURIComponent(response.razorpay_signature)}&` +
+        `order_id=${encodeURIComponent(response.razorpay_order_id)}&` +
+        `form_id=${encodeURIComponent('${formId}')}&` +
+        `email=${encodeURIComponent('${email}')}`;
+    
+    console.log('🔗 Verification URL:', verifyUrl);
+    
+    // Redirect to verification function (GET request with query parameters)
+    window.location.href = verifyUrl;
+}
 
             function handlePaymentFailure(error) {
                 console.error('❌ Payment failed:', error);
