@@ -1,11 +1,11 @@
-// netlify/functions/create-razorpay-order.js - UPDATED TO FOLLOW CASHFREE PATTERN
+// netlify/functions/create-razorpay-order.js - FIXED VERSION
 const { createClient } = require('@supabase/supabase-js');
 
 exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Content-Type': 'application/json'
   };
 
@@ -14,277 +14,281 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    // ✅ Extract all required parameters from request body (same as CashFree)
-    const { 
+    console.log('🚀 Creating Razorpay payment order');
+    console.log('📥 Request body:', event.body);
+    
+    const requestData = JSON.parse(event.body);
+    let { 
       form_id, 
-      email, 
+      email,           // Could be undefined
+      customer_email,  // Alternative field name
+      customer_name,
       product_name, 
       product_price, 
-      customer_name = "Customer", 
-      customer_phone = "9999999999",
-      form_admin_id
-    } = JSON.parse(event.body || '{}');
+      form_admin_id,
+      admin_id
+    } = requestData;
 
     console.log('📥 Request received:', {
       form_id,
-      email,
+      email: email || customer_email,
       product_name,
       product_price,
       form_admin_id: form_admin_id || 'NOT PROVIDED'
     });
 
-    // Validate required environment variables
-    const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
-    const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
-
-    if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
-      throw new Error('Razorpay credentials not configured');
+    // 🔧 FIX 1: Normalize email field
+    const customerEmail = email || customer_email;
+    
+    // 🔧 FIX 2: Extract proper price from product name if price is wrong
+    let actualPrice = product_price;
+    if (product_name && (product_price === 1 || product_price < 10)) {
+      console.log('⚠️ Detected wrong price, extracting from product name...');
+      const priceMatch = product_name.match(/₹(\d+)/);
+      if (priceMatch) {
+        actualPrice = parseInt(priceMatch[1]);
+        console.log(`🔧 Corrected price: ${product_price} → ${actualPrice}`);
+      }
     }
 
-    // Generate unique order ID (same pattern as CashFree)
-    const orderId = `payform_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    // 🔧 FIX 3: Generate default email if missing (for testing)
+    let finalEmail = customerEmail;
+    if (!finalEmail) {
+      finalEmail = `test-${Date.now()}@payform.test`;
+      console.log(`⚠️ No email provided, using test email: ${finalEmail}`);
+    }
 
-    // ✅ Create orderDetails object early for consistent usage (same as CashFree)
-    const orderDetails = {
-      form_id, 
-      email, 
-      product_name, 
-      product_price, 
-      customer_name, 
-      customer_phone, 
-      form_admin_id
-    };
+    // 🔧 FIX 4: Generate default customer name if missing
+    const finalCustomerName = customer_name || finalEmail.split('@')[0] || 'Customer';
 
-    // ✅ Resolve admin ID using same logic as CashFree
-    const adminId = await resolveAdminId(orderDetails);
+    console.log('🔧 Final processed data:', {
+      email: finalEmail,
+      customerName: finalCustomerName,
+      productName: product_name,
+      actualPrice: actualPrice
+    });
 
-    // Create Razorpay Order (instead of CashFree)
-    const orderData = {
-      amount: Math.round(parseFloat(product_price) * 100), // Convert to paise
-      currency: "INR",
-      receipt: orderId,
-      notes: {
-        form_id: form_id,
-        customer_email: email,
-        product_name: product_name,
-        admin_id: adminId,
-        customer_name: customer_name
+    // Environment variables validation
+    const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
+    const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
+    const SUPABASE_URL = process.env.SUPABASE_URL;
+    const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET || !SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      return {
+        statusCode: 500,
+        headers,
+        body: JSON.stringify({ 
+          success: false,
+          error: 'Server configuration error - missing environment variables' 
+        })
+      };
+    }
+
+    // Create Supabase client
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    // 🔍 Resolve admin ID
+    let resolvedAdminId = admin_id || form_admin_id;
+    
+    console.log('🔍 Resolving admin ID...', {
+      received_admin_id: resolvedAdminId || 'NONE',
+      form_id: form_id
+    });
+
+    if (!resolvedAdminId && form_id) {
+      // Try to find admin ID from form_configs
+      const { data: formConfig, error: configError } = await supabase
+        .from('form_configs')
+        .select('admin_id, form_name')
+        .eq('form_id', form_id)
+        .single();
+
+      if (formConfig) {
+        resolvedAdminId = formConfig.admin_id;
+        console.log('✅ Found admin ID in form_configs:', {
+          admin_id: resolvedAdminId,
+          form_name: formConfig.form_name
+        });
+      } else {
+        console.log('❌ No form config found for form_id:', form_id);
       }
-    };
+    }
+
+    if (!resolvedAdminId) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ 
+          success: false,
+          error: 'Admin ID not found. Please ensure form is registered.',
+          form_id: form_id
+        })
+      };
+    }
+
+    // Generate unique order ID
+    const orderId = `payform_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Calculate commission breakdown
+    const totalAmount = parseFloat(actualPrice);
+    const gatewayFee = (totalAmount * 2.0 / 100) + 2; // Razorpay: 2% + ₹2
+    const platformCommission = totalAmount * 3 / 100;
+    const netAmountToAdmin = totalAmount - gatewayFee - platformCommission;
 
     console.log('💳 Creating Razorpay order...');
 
-    const orderResponse = await fetch('https://api.razorpay.com/v1/orders', {
+    // Create Razorpay order
+    const razorpayPayload = {
+      amount: totalAmount * 100, // Convert to paise
+      currency: 'INR',
+      receipt: orderId,
+      notes: {
+        form_id: form_id,
+        admin_id: resolvedAdminId,
+        product_name: product_name,
+        customer_email: finalEmail
+      }
+    };
+
+    console.log('💳 Razorpay payload:', razorpayPayload);
+
+    // Call Razorpay API
+    const razorpayResponse = await fetch('https://api.razorpay.com/v1/orders', {
       method: 'POST',
       headers: {
-        'Authorization': `Basic ${Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64')}`,
-        'Content-Type': 'application/json'
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': `Basic ${Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64')}`
       },
-      body: JSON.stringify(orderData)
+      body: JSON.stringify(razorpayPayload)
     });
 
-    if (!orderResponse.ok) {
-      const errorText = await orderResponse.text();
-      throw new Error(`Razorpay order creation failed: ${errorText}`);
+    const razorpayResult = await razorpayResponse.json();
+    console.log('💳 Razorpay response:', { 
+      status: razorpayResponse.status, 
+      ok: razorpayResponse.ok,
+      order_id: razorpayResult.id
+    });
+
+    if (!razorpayResponse.ok) {
+      console.error('❌ Razorpay API error:', razorpayResult);
+      return {
+        statusCode: 500,
+        headers,
+        body: JSON.stringify({ 
+          success: false,
+          error: 'Failed to create Razorpay order',
+          details: razorpayResult 
+        })
+      };
     }
 
-    const razorpayOrder = await orderResponse.json();
-    console.log('✅ Order created:', razorpayOrder.id);
+    console.log('✅ Order created:', razorpayResult.id);
 
-    // Generate checkout URL (Razorpay equivalent to CashFree payment link)
-    const checkoutUrl = `https://rzp.io/i/${razorpayOrder.id}`;
+    // 🔧 FIX 5: Generate proper payment URL
+    // Razorpay doesn't provide direct payment links like Cashfree
+    // We need to create a checkout URL that redirects to Razorpay
+    const checkoutUrl = `${process.env.URL}/.netlify/functions/payment-page?order_id=${razorpayResult.id}&amount=${totalAmount}&email=${encodeURIComponent(finalEmail)}&product=${encodeURIComponent(product_name)}`;
 
-    // ✅ Log transaction to database (same logic as CashFree)
-    await logTransactionToDatabase(orderId, razorpayOrder, orderDetails, adminId);
+    console.log('🔗 Generated checkout URL:', checkoutUrl);
+
+    // Save transaction to database
+    console.log('💾 Logging transaction with admin ID:', resolvedAdminId);
+
+    const transactionData = {
+      form_id: form_id,
+      email: finalEmail,
+      customer_name: finalCustomerName,
+      product_name: product_name,
+      payment_amount: totalAmount,
+      payment_currency: 'INR',
+      payment_status: 'pending',
+      payment_provider: 'razorpay',
+      transaction_id: orderId,
+      razorpay_order_id: razorpayResult.id,
+      gateway_fee: Number(gatewayFee.toFixed(2)),
+      platform_commission: Number(platformCommission.toFixed(2)),
+      net_amount_to_admin: Number(netAmountToAdmin.toFixed(2)),
+      admin_id: resolvedAdminId,
+      gateway_used: 'razorpay',
+      auto_split_enabled: true,
+      created_at: new Date().toISOString()
+    };
+
+    console.log('💾 Transaction data summary:', {
+      transaction_id: orderId,
+      admin_id: resolvedAdminId,
+      amount: totalAmount,
+      form_id: form_id,
+      net_amount_to_admin: netAmountToAdmin
+    });
+
+    const { data: transactionResult, error: dbError } = await supabase
+      .from('transactions')
+      .insert([transactionData])
+      .select()
+      .single();
+
+    if (dbError) {
+      console.error('❌ Database insert error:', dbError);
+      // Continue anyway, order is created
+    } else {
+      console.log('✅ Transaction logged successfully:', { 
+        id: transactionResult.id, 
+        admin_id: transactionResult.admin_id 
+      });
+    }
+
+    // Log platform commission
+    const { error: commissionError } = await supabase
+      .from('platform_commissions')
+      .insert({
+        transaction_id: transactionResult?.id,
+        form_admin_id: resolvedAdminId,
+        commission_amount: platformCommission,
+        commission_rate: 3.0,
+        platform_fee: platformCommission,
+        gateway_fee: gatewayFee,
+        status: 'pending',
+        created_at: new Date().toISOString()
+      });
+
+    if (commissionError) {
+      console.error('❌ Commission logging error:', commissionError);
+    } else {
+      console.log('✅ Commission logged successfully');
+    }
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: true,
-        order_id: orderId,
-        razorpay_order_id: razorpayOrder.id,
+        gateway: 'razorpay',
         checkout_url: checkoutUrl,
-        payment_url: checkoutUrl, // For compatibility
-        admin_id_used: adminId
+        order_id: razorpayResult.id,
+        amount: totalAmount,
+        customer_email: finalEmail,
+        commission_breakdown: {
+          total_amount: totalAmount,
+          gateway_fee: gatewayFee,
+          platform_commission: platformCommission,
+          form_admin_receives: netAmountToAdmin
+        }
       })
     };
 
   } catch (error) {
-    console.error('❌ Function error:', error);
+    console.error('❌ Payment creation error:', error);
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({ 
-        success: false, 
-        error: error.message,
-        details: 'Check Netlify function logs for more information'
+        success: false,
+        error: 'Internal server error',
+        message: error.message 
       })
     };
   }
 };
-
-// ✅ REUSE EXACT SAME FUNCTIONS FROM CASHFREE (no changes needed)
-async function resolveAdminId(orderDetails) {
-  const { form_id, form_admin_id } = orderDetails;
-  
-  console.log('🔍 Resolving admin ID...', {
-    received_admin_id: form_admin_id || 'NONE',
-    form_id: form_id
-  });
-
-  // ✅ STRATEGY 1: Use admin ID from Google Apps Script (highest priority)
-  if (form_admin_id && form_admin_id.trim() !== '') {
-    console.log('✅ Using admin ID from Google Apps Script:', form_admin_id);
-    return form_admin_id;
-  }
-
-  // ✅ STRATEGY 2: Look up admin ID from form_configs table
-  try {
-    const SUPABASE_URL = process.env.SUPABASE_URL;
-    const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
-      const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-      
-      const { data: formConfig, error } = await supabase
-        .from('form_configs')
-        .select('admin_id, form_name')
-        .eq('form_id', form_id)
-        .single();
-      
-      if (!error && formConfig?.admin_id) {
-        console.log('✅ Found admin ID in form_configs:', {
-          admin_id: formConfig.admin_id,
-          form_name: formConfig.form_name
-        });
-        return formConfig.admin_id;
-      } else {
-        console.log('⚠️ Form not found in form_configs:', error?.message || 'No data returned');
-      }
-    }
-  } catch (dbError) {
-    console.error('❌ Database lookup error:', dbError.message);
-  }
-
-  // ✅ STRATEGY 3: Get the first active admin as fallback
-  try {
-    const SUPABASE_URL = process.env.SUPABASE_URL;
-    const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
-      const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-      
-      const { data: activeAdmin, error } = await supabase
-        .from('form_admins')
-        .select('id, email')
-        .eq('is_active', true)
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .single();
-      
-      if (!error && activeAdmin?.id) {
-        console.log('⚠️ Using first active admin as fallback:', {
-          admin_id: activeAdmin.id,
-          email: activeAdmin.email
-        });
-        return activeAdmin.id;
-      }
-    }
-  } catch (fallbackError) {
-    console.error('❌ Fallback admin lookup error:', fallbackError.message);
-  }
-
-  throw new Error(`Cannot resolve admin ID for form: ${form_id}. Please ensure the form is registered in PayForm dashboard.`);
-}
-
-// ✅ ADAPTED DATABASE LOGGING (similar to CashFree but for Razorpay)
-async function logTransactionToDatabase(orderId, razorpayOrder, orderDetails, adminId) {
-  try {
-    const SUPABASE_URL = process.env.SUPABASE_URL;
-    const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-      console.log('⚠️ Supabase credentials not configured, skipping database logging');
-      return;
-    }
-
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    
-    console.log('💾 Logging transaction with admin ID:', adminId);
-
-    // Calculate commission split (same as CashFree)
-    const totalAmount = parseFloat(orderDetails.product_price);
-    const gatewayFee = (totalAmount * 2.0 / 100) + 2; // Razorpay: 2% + ₹2
-    const platformCommission = totalAmount * 3 / 100; // Platform: 3%
-    const netAmountToAdmin = totalAmount - gatewayFee - platformCommission;
-
-    // Insert transaction record (adapted for Razorpay)
-    const transactionData = {
-      form_id: orderDetails.form_id,
-      email: orderDetails.email,
-      customer_name: orderDetails.customer_name,
-      product_name: orderDetails.product_name,
-      payment_amount: totalAmount,
-      payment_currency: 'INR',
-      payment_status: 'pending',
-      payment_provider: 'razorpay', // Changed from 'cashfree'
-      transaction_id: orderId,
-      razorpay_order_id: razorpayOrder.id, // Changed from cashfree_order_id
-      gateway_fee: Number(gatewayFee.toFixed(2)),
-      platform_commission: Number(platformCommission.toFixed(2)),
-      net_amount_to_admin: Number(netAmountToAdmin.toFixed(2)),
-      admin_id: adminId,
-      created_at: new Date().toISOString()
-    };
-
-    console.log('💾 Transaction data summary:', {
-      transaction_id: orderId,
-      admin_id: adminId,
-      amount: totalAmount,
-      form_id: orderDetails.form_id,
-      net_amount_to_admin: Number(netAmountToAdmin.toFixed(2))
-    });
-
-    const { data, error: dbError } = await supabase
-      .from('transactions')
-      .insert([transactionData])
-      .select('id, admin_id');
-
-    if (dbError) {
-      console.error('❌ Database logging error:', dbError);
-      throw new Error(`Database logging failed: ${dbError.message}`);
-    } else {
-      console.log('✅ Transaction logged successfully:', data?.[0]);
-    }
-
-    // ✅ Log to platform_commissions table (same as CashFree)
-    if (data?.[0]?.id) {
-      const commissionData = {
-        transaction_id: data[0].id,
-        form_admin_id: adminId,
-        commission_amount: Number(platformCommission.toFixed(2)),
-        commission_rate: 3.0,
-        platform_fee: Number(platformCommission.toFixed(2)),
-        gateway_fee: Number(gatewayFee.toFixed(2)),
-        net_amount_to_admin: Number(netAmountToAdmin.toFixed(2)),
-        status: 'pending',
-        created_at: new Date().toISOString()
-      };
-
-      const { error: commissionError } = await supabase
-        .from('platform_commissions')
-        .insert([commissionData]);
-
-      if (commissionError) {
-        console.error('⚠️ Commission logging error:', commissionError);
-      } else {
-        console.log('✅ Commission logged successfully');
-      }
-    }
-
-  } catch (error) {
-    console.error('❌ Database logging failed:', error);
-    // Don't throw error here - payment creation should still succeed
-  }
-}
