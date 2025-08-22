@@ -1,7 +1,6 @@
-// netlify/functions/monitor-form-responses.js - FIXED VERSION WITH PROPER ASYNC/AWAIT
+// netlify/functions/monitor-form-responses.js - FIXED VERSION USING SUPABASE EMAIL (NO SMTP NEEDED)
 const { createClient } = require('@supabase/supabase-js');
 const { google } = require('googleapis');
-const nodemailer = require('nodemailer');
 
 // In-memory tracking to prevent duplicates in same execution
 const processedInSession = new Set();
@@ -20,65 +19,45 @@ const headers = {
   'Content-Type': 'application/json'
 };
 
-// Email transporter configuration
-const createEmailTransporter = () => {
-  return nodemailer.createTransporter({
-    service: 'gmail',
-    auth: {
-      user: process.env.SMTP_EMAIL,
-      pass: process.env.SMTP_PASSWORD
-    }
-  });
-};
-
-// Send payment email function
-const sendPaymentEmail = async (customerEmail, customerName, productName, productPrice, paymentUrl) => {
+// Send payment email using Supabase Edge Function (SAME AS CASHFREE)
+const sendPaymentEmail = async (customerEmail, customerName, productName, productPrice, paymentUrl, adminId, orderId) => {
   try {
-    const transporter = createEmailTransporter();
-    
-    const mailOptions = {
-      from: process.env.SMTP_EMAIL,
-      to: customerEmail,
-      subject: `Complete Your Payment - ${productName}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #2563eb;">Thank you for your submission, ${customerName}!</h2>
-          
-          <p>Please complete your payment securely using <strong>Razorpay</strong> by clicking the button below:</p>
-          
-          <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-            <h3 style="margin: 0; color: #495057;">Order Summary:</h3>
-            <p style="margin: 5px 0;"><strong>Product:</strong> ${productName}</p>
-            <p style="margin: 5px 0;"><strong>Amount:</strong> ₹${productPrice}</p>
-            <p style="margin: 5px 0;"><strong>Email:</strong> ${customerEmail}</p>
-          </div>
-          
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="${paymentUrl}" 
-               style="background-color: #2563eb; color: white; padding: 15px 30px; 
-                      text-decoration: none; border-radius: 5px; font-size: 16px; font-weight: bold;">
-              Pay ₹${productPrice} Securely
-            </a>
-          </div>
-          
-          <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 20px 0;">
-            <p style="margin: 0; font-size: 14px; color: #1565c0;">
-              🔒 Secure payment powered by Razorpay<br>
-              💳 UPI, Cards, Net Banking, and Wallets accepted
-            </p>
-          </div>
-          
-          <p>If you face any issues, feel free to reply to this email.</p>
-          
-          <p>Best regards,<br>PayForm Team</p>
-        </div>
-      `
-    };
+    console.log(`📧 Sending payment email to ${customerEmail} using Supabase Edge Function`);
 
-    const result = await transporter.sendMail(mailOptions);
-    console.log('📧 Payment email sent successfully:', result.messageId);
-    return { success: true, messageId: result.messageId };
+    // Use the SAME email system as CashFree
+    const emailResponse = await fetch(`${process.env.SUPABASE_URL}/functions/v1/send-payment-email`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+      },
+      body: JSON.stringify({
+        to: customerEmail,
+        subject: `Complete Your Payment - ${productName}`,
+        customerName: customerName,
+        productName: productName,
+        amount: productPrice,
+        paymentUrl: paymentUrl,
+        orderId: orderId,
+        adminId: adminId,
+        
+        // Email type for payment link (not confirmation)
+        isConfirmation: false,
+        emailType: 'payment_link'
+      })
+    });
+
+    const emailResult = await emailResponse.json();
+    console.log('📧 Supabase Email API response:', emailResult);
     
+    if (emailResult.success) {
+      console.log(`✅ Payment email sent to ${customerEmail} (Type: ${emailResult.emailType || 'payment_link'})`);
+      return { success: true, messageId: emailResult.messageId };
+    } else {
+      console.error(`❌ Failed to send payment email:`, emailResult.error);
+      return { success: false, error: emailResult.error };
+    }
+
   } catch (error) {
     console.error('❌ Email sending failed:', error);
     return { success: false, error: error.message };
@@ -256,7 +235,7 @@ exports.handler = async (event, context) => {
 
           console.log('📋 Extracted data:', formData);
 
-          // Create Razorpay order
+          // Create Razorpay order (using the same pattern as CashFree)
           const orderResponse = await fetch(`${process.env.URL}/.netlify/functions/create-razorpay-order`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -272,7 +251,7 @@ exports.handler = async (event, context) => {
 
           const orderData = await orderResponse.json();
 
-          if (!orderData.success || !orderData.payment_url) {
+          if (!orderData.success || !orderData.checkout_url) {
             console.error('❌ Failed to create Razorpay order:', orderData.error);
             
             await supabase
@@ -291,13 +270,15 @@ exports.handler = async (event, context) => {
 
           console.log('💳 Razorpay order created:', orderData.order_id);
 
-          // Send payment email
+          // Send payment email using Supabase Edge Function (SAME AS CASHFREE)
           const emailResult = await sendPaymentEmail(
             formData.email,
             formData.name,
             formData.product,
             formData.productPrice,
-            orderData.payment_url
+            orderData.checkout_url,
+            form.admin_id,
+            orderData.order_id
           );
 
           if (emailResult.success) {
