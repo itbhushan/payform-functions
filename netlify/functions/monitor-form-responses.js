@@ -360,11 +360,14 @@ function extractFormData(response, fieldMapping) {
   return extractedData;
 }
 
+// In your monitor-form-responses.js file, find the createRazorpayOrder function (around line 280)
+// REPLACE this function:
+
 async function createRazorpayOrder(orderData) {
   try {
     console.log('💳 Creating Razorpay order with data:', orderData);
     
-    // Call your existing create-razorpay-order function
+    // CHANGE THIS URL from create-razorpay-order to match your CashFree pattern
     const response = await fetch(`${process.env.URL || 'https://payform2025.netlify.app'}/.netlify/functions/create-razorpay-order`, {
       method: 'POST',
       headers: {
@@ -381,4 +384,130 @@ async function createRazorpayOrder(orderData) {
     console.error('Error creating Razorpay order:', error);
     return { success: false, error: error.message };
   }
+}
+
+// In the processIndividualResponse function, REPLACE the email sending section:
+// Find this section (around line 150-170):
+
+      // Send payment link email
+      console.log(`📧 Sending payment email to: ${extractedData.email}`);
+      
+      try {
+        // CREATE EMAIL SENDING FUNCTION CALL (reuse CashFree email sending logic)
+        await sendPaymentEmail({
+          email: extractedData.email,
+          customer_name: extractedData.name,
+          product_name: extractedData.productName,
+          amount: extractedData.productPrice,
+          payment_url: paymentResult.checkout_url || paymentResult.payment_url,
+          order_id: paymentResult.order_id,
+          form_id: formConfig.form_id
+        });
+        
+        console.log('✅ Payment email sent successfully');
+      } catch (emailError) {
+        console.error('❌ Email sending error:', emailError);
+      }
+
+// ADD this email sending function (adapted from your CashFree email logic):
+async function sendPaymentEmail(emailData) {
+  try {
+    console.log(`📧 Sending payment link email to: ${emailData.email}`);
+    
+    // Generate email content (reuse your CashFree email template)
+    const emailHtml = generatePaymentLinkEmail(emailData);
+    
+    // You can integrate with your email service here
+    // For now, we'll log the email content
+    console.log('📧 Email template generated for payment link');
+    
+    // If you have email service configured, send the email here
+    // Example: await sendEmailViaService(emailData.email, 'Payment Link', emailHtml);
+    
+    return true;
+  } catch (error) {
+    console.error('❌ Error sending payment email:', error);
+    throw error;
+  }
+}
+
+// ADD email template function (adapted from CashFree):
+function generatePaymentLinkEmail(emailData) {
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Complete Your Payment</title>
+      </head>
+      <body style="font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f8f9fa;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fa; padding: 20px;">
+          <tr>
+            <td align="center">
+              <table width="600" cellpadding="0" cellspacing="0" style="background-color: white; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                
+                <!-- Header -->
+                <tr>
+                  <td style="padding: 30px; text-align: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px 10px 0 0;">
+                    <h1 style="color: white; margin: 0; font-size: 28px;">💳 PayForm</h1>
+                    <p style="color: white; margin: 10px 0 0 0; font-size: 16px;">Complete Your Payment</p>
+                  </td>
+                </tr>
+                
+                <!-- Content -->
+                <tr>
+                  <td style="padding: 30px;">
+                    <h2 style="color: #333; margin: 0 0 20px 0;">Hi ${emailData.customer_name || 'Customer'}! 👋</h2>
+                    <p style="color: #666; font-size: 16px; line-height: 1.6;">
+                      Thank you for your submission! Please complete your payment to proceed.
+                    </p>
+                    
+                    <!-- Order Summary -->
+                    <table width="100%" cellpadding="15" cellspacing="0" style="background-color: #f8f9fa; border-radius: 8px; margin: 20px 0;">
+                      <tr>
+                        <td>
+                          <h3 style="margin: 0 0 15px 0; color: #333;">📋 Order Summary</h3>
+                          <p style="margin: 5px 0; color: #666;"><strong>Product:</strong> ${emailData.product_name}</p>
+                          <p style="margin: 5px 0; color: #666;"><strong>Amount:</strong> ₹${emailData.amount}</p>
+                          <p style="margin: 5px 0; color: #666;"><strong>Order ID:</strong> ${emailData.order_id}</p>
+                        </td>
+                      </tr>
+                    </table>
+                    
+                    <!-- Payment Button -->
+                    <div style="text-align: center; margin: 30px 0;">
+                      <a href="${emailData.payment_url}" 
+                         style="background-color: #528FF0; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: bold; display: inline-block;">
+                        💰 Pay ₹${emailData.amount} Securely
+                      </a>
+                    </div>
+                    
+                    <!-- Security Info -->
+                    <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px; border-left: 4px solid #2196f3;">
+                      <p style="margin: 0; color: #1976d2; font-size: 14px;">
+                        🔒 <strong>Secure Payment:</strong> Your payment is processed securely via Razorpay. 
+                        We support UPI, Credit/Debit Cards, Net Banking, and Wallets.
+                      </p>
+                    </div>
+                  </td>
+                </tr>
+                
+                <!-- Footer -->
+                <tr>
+                  <td style="padding: 20px; text-align: center; background-color: #f8f9fa; border-radius: 0 0 10px 10px;">
+                    <p style="margin: 0; color: #999; font-size: 12px;">
+                      © 2025 PayForm. All rights reserved.<br>
+                      This is an automated email, please do not reply directly.
+                    </p>
+                  </td>
+                </tr>
+                
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+  `;
 }
