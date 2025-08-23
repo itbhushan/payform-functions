@@ -1,12 +1,12 @@
-// netlify/functions/payment-page.js - Updated for Razorpay Payment Processing
-const { createClient } = require('@supabase/supabase-js');
+// netlify/functions/payment-page.js - ES MODULE VERSION
+import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-exports.handler = async (event, context) => {
+export const handler = async (event, context) => {
   const headers = {
     'Content-Type': 'text/html; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
@@ -255,23 +255,23 @@ function generateRazorpayPaymentPage(orderData) {
                 }
             }
 
-function handlePaymentSuccess(response) {
-    document.getElementById('loading').innerHTML = 'Payment successful! Verifying...';
-    
-    // Build query parameters for verification (matching your verify function)
-    const verifyUrl = `/.netlify/functions/verify-razorpay-payment?` +
-        `razorpay_payment_id=${encodeURIComponent(response.razorpay_payment_id)}&` +
-        `razorpay_order_id=${encodeURIComponent(response.razorpay_order_id)}&` +
-        `razorpay_signature=${encodeURIComponent(response.razorpay_signature)}&` +
-        `order_id=${encodeURIComponent(response.razorpay_order_id)}&` +
-        `form_id=${encodeURIComponent('${formId}')}&` +
-        `email=${encodeURIComponent('${email}')}`;
-    
-    console.log('🔗 Verification URL:', verifyUrl);
-    
-    // Redirect to verification function (GET request with query parameters)
-    window.location.href = verifyUrl;
-}
+            function handlePaymentSuccess(response) {
+                document.getElementById('loading').innerHTML = 'Payment successful! Verifying...';
+                
+                // Build query parameters for verification (matching your verify function)
+                const verifyUrl = \`/.netlify/functions/verify-razorpay-payment?\` +
+                    \`razorpay_payment_id=\${encodeURIComponent(response.razorpay_payment_id)}&\` +
+                    \`razorpay_order_id=\${encodeURIComponent(response.razorpay_order_id)}&\` +
+                    \`razorpay_signature=\${encodeURIComponent(response.razorpay_signature)}&\` +
+                    \`order_id=\${encodeURIComponent(response.razorpay_order_id)}&\` +
+                    \`form_id=\${encodeURIComponent('${formId}')}&\` +
+                    \`email=\${encodeURIComponent('${email}')}\`;
+                
+                console.log('🔗 Verification URL:', verifyUrl);
+                
+                // Redirect to verification function (GET request with query parameters)
+                window.location.href = verifyUrl;
+            }
 
             function handlePaymentFailure(error) {
                 console.error('❌ Payment failed:', error);
