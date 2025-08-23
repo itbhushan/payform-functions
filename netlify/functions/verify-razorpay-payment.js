@@ -1,8 +1,8 @@
-// netlify/functions/verify-razorpay-payment.js - UPDATED TO FOLLOW CASHFREE PATTERN
-const { createClient } = require('@supabase/supabase-js');
-const crypto = require('crypto');
+// netlify/functions/verify-razorpay-payment.js - ES MODULE VERSION
+import { createClient } from '@supabase/supabase-js';
+import crypto from 'crypto';
 
-exports.handler = async (event, context) => {
+export const handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
