@@ -1,4 +1,4 @@
-// netlify/functions/monitor-form-responses.js - FIXED TO USE ADMIN OAUTH TOKENS
+// netlify/functions/monitor-form-responses.js - FIXED DUPLICATE PROCESSING
 const { createClient } = require('@supabase/supabase-js');
 const { google } = require('googleapis');
 
@@ -172,6 +172,9 @@ exports.handler = async (event, context) => {
   try {
     console.log('🔍 Starting form monitoring...');
 
+    // 🚨 CRITICAL FIX: Clear processed session at start to prevent memory leak
+    processedInSession.clear();
+
     // Check for pause/resume commands
     if (event.body) {
       try {
@@ -222,6 +225,7 @@ exports.handler = async (event, context) => {
     let totalProcessed = 0;
     let emailsSent = 0;
     let errors = 0;
+    let skippedAlreadyProcessed = 0;
 
     // Process each form
     for (const form of activeForms) {
@@ -240,33 +244,46 @@ exports.handler = async (event, context) => {
         const responses = formResponses.data.responses || [];
         console.log(`📝 Found ${responses.length} total responses for form ${form.form_name}`);
 
+        // 🚨 CRITICAL FIX: Get all already processed responses for this form at once
+        const { data: processedResponses, error: processedError } = await supabase
+          .from('processed_form_responses')
+          .select('response_id')
+          .eq('form_id', form.form_id);
+
+        if (processedError) {
+          console.error('❌ Error fetching processed responses:', processedError);
+        }
+
+        // Create a Set for faster lookups
+        const processedResponseIds = new Set(
+          (processedResponses || []).map(r => r.response_id)
+        );
+
+        console.log(`📊 Already processed ${processedResponseIds.size} responses for this form`);
+
         // Process each response
         for (const response of responses) {
           const responseId = response.responseId;
           const sessionKey = `${form.form_id}-${responseId}`;
+
+          // 🚨 CRITICAL FIX: Skip if already processed (database check)
+          if (processedResponseIds.has(responseId)) {
+            skippedAlreadyProcessed++;
+            continue;
+          }
 
           // Skip if already processed in this session
           if (processedInSession.has(sessionKey)) {
             continue;
           }
 
-          // Check if already processed in database
-          const { data: existingRecord } = await supabase
-            .from('processed_form_responses')
-            .select('id')
-            .eq('response_id', responseId)
-            .eq('form_id', form.form_id)
-            .single();
-
-          if (existingRecord) {
-            processedInSession.add(sessionKey);
-            continue;
-          }
-
           console.log(`🆕 Processing new response: ${responseId}`);
 
-          // Mark as processing immediately to prevent race conditions
-          await supabase
+          // 🚨 CRITICAL FIX: Add to processedInSession immediately to prevent race conditions
+          processedInSession.add(sessionKey);
+
+          // Mark as processing in database immediately to prevent duplicates
+          const { error: insertError } = await supabase
             .from('processed_form_responses')
             .insert({
               response_id: responseId,
@@ -274,6 +291,11 @@ exports.handler = async (event, context) => {
               status: 'processing',
               processed_at: new Date().toISOString()
             });
+
+          if (insertError) {
+            console.log(`⚠️ Response ${responseId} might already be processing, skipping...`);
+            continue;
+          }
 
           // Extract form data
           const formData = extractFormData(response);
@@ -284,11 +306,14 @@ exports.handler = async (event, context) => {
             // Update status to failed
             await supabase
               .from('processed_form_responses')
-              .update({ status: 'failed', error_message: 'Incomplete form data' })
+              .update({ 
+                status: 'failed', 
+                error_message: 'Incomplete form data',
+                updated_at: new Date().toISOString()
+              })
               .eq('response_id', responseId)
               .eq('form_id', form.form_id);
             
-            processedInSession.add(sessionKey);
             errors++;
             continue;
           }
@@ -318,12 +343,12 @@ exports.handler = async (event, context) => {
               .from('processed_form_responses')
               .update({ 
                 status: 'failed', 
-                error_message: `Payment order creation failed: ${orderData.error}` 
+                error_message: `Payment order creation failed: ${orderData.error}`,
+                updated_at: new Date().toISOString()
               })
               .eq('response_id', responseId)
               .eq('form_id', form.form_id);
             
-            processedInSession.add(sessionKey);
             errors++;
             continue;
           }
@@ -352,7 +377,8 @@ exports.handler = async (event, context) => {
                 status: 'completed',
                 razorpay_order_id: orderData.order_id,
                 email_sent: true,
-                email_message_id: emailResult.messageId
+                email_message_id: emailResult.messageId,
+                updated_at: new Date().toISOString()
               })
               .eq('response_id', responseId)
               .eq('form_id', form.form_id);
@@ -365,7 +391,8 @@ exports.handler = async (event, context) => {
               .update({
                 status: 'failed',
                 error_message: `Email sending failed: ${emailResult.error}`,
-                razorpay_order_id: orderData.order_id
+                razorpay_order_id: orderData.order_id,
+                updated_at: new Date().toISOString()
               })
               .eq('response_id', responseId)
               .eq('form_id', form.form_id);
@@ -373,7 +400,6 @@ exports.handler = async (event, context) => {
             errors++;
           }
 
-          processedInSession.add(sessionKey);
           totalProcessed++;
 
         } // End response processing loop
@@ -393,7 +419,7 @@ exports.handler = async (event, context) => {
     } // End form processing loop
 
     console.log('✅ Monitoring cycle completed');
-    console.log(`📊 Summary: ${totalProcessed} processed, ${emailsSent} emails sent, ${errors} errors`);
+    console.log(`📊 Summary: ${totalProcessed} processed, ${emailsSent} emails sent, ${skippedAlreadyProcessed} already processed, ${errors} errors`);
 
     return {
       statusCode: 200,
@@ -404,6 +430,7 @@ exports.handler = async (event, context) => {
           forms_checked: activeForms.length,
           responses_processed: totalProcessed,
           emails_sent: emailsSent,
+          already_processed: skippedAlreadyProcessed,
           errors: errors
         }
       })
