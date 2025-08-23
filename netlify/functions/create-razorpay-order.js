@@ -1,6 +1,6 @@
-// netlify/functions/create-razorpay-order.js - FIXED VERSION
-const { createClient } = require('@supabase/supabase-js');
-const Razorpay = require('razorpay');
+// netlify/functions/create-razorpay-order.js - ES MODULE VERSION
+import { createClient } from '@supabase/supabase-js';
+import Razorpay from 'razorpay';
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -12,7 +12,7 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
-exports.handler = async (event, context) => {
+export const handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
