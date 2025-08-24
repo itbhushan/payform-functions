@@ -233,33 +233,23 @@ export const handler = async (event, context) => {
 // ✅ REUSE SAME EMAIL LOGIC AS CASHFREE (adapted for Razorpay)
 // Replace the sendCustomerConfirmationEmail function in your verify-razorpay-payment.js
 
+// PERMANENT SIMPLE FIX: Replace sendCustomerConfirmationEmail function
+// This sends a proper success email using the same system as payment request emails
+
 const sendCustomerConfirmationEmail = async (orderData, paymentData, email, formId) => {
   try {
-    console.log(`📧 Sending confirmation email to ${email}`);
+    console.log(`📧 Sending PAYMENT SUCCESS email to ${email}`);
 
-    // Get form and admin info
-    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-    
-    const { data: formData, error: formError } = await supabase
-      .from('form_configs')
-      .select(`
-        form_name,
-        admin_id,
-        form_admins (
-          name,
-          email
-        )
-      `)
-      .eq('form_id', formId)
-      .single();
-
-    const adminInfo = formData?.form_admins?.[0] || { name: 'PayForm Team' };
-    const formName = formData?.form_name || 'Your Form';
     const amount = orderData.amount / 100; // Convert from paise
+    const orderId = orderData.id;
+    const customerName = orderData.notes?.customer_name || email.split('@')[0];
+    const paymentTime = new Date().toLocaleString('en-IN', { 
+      timeZone: 'Asia/Kolkata',
+      dateStyle: 'full',
+      timeStyle: 'short'
+    });
 
-    console.log('📋 Sending success email with amount:', amount);
-
-    // 🚨 NEW: Use the same email sending method as the payment request emails
+    // Create success email using the SAME method as payment emails
     const emailResponse = await fetch(`${process.env.SUPABASE_URL}/functions/v1/send-payment-email`, {
       method: 'POST',
       headers: {
@@ -268,15 +258,26 @@ const sendCustomerConfirmationEmail = async (orderData, paymentData, email, form
       },
       body: JSON.stringify({
         to: email,
-        subject: `Payment Successful - ${formName}`,
-        paymentLink: null, // No payment link needed for success emails
-        productName: formData?.product_name || 'Your Purchase',
+        subject: `🎉 Payment Successful - ₹${amount} Confirmed`,
+        // Custom success template data
+        paymentLink: null,
+        productName: 'Your Purchase',
         amount: amount,
-        customerName: orderData.notes?.customer_name || email.split('@')[0],
-        adminId: formData?.admin_id,
-        isConfirmation: true, // 🚨 This tells the email function to send success template
-        transactionId: orderData.id,
-        paymentId: paymentData?.id || 'N/A'
+        customerName: customerName,
+        adminId: 'success',
+        isConfirmation: true,
+        // Success-specific data
+        transactionId: orderId,
+        paymentDate: paymentTime,
+        paymentMethod: 'Razorpay',
+        successTemplate: {
+          orderId: orderId,
+          amount: amount,
+          customerName: customerName,
+          email: email,
+          paymentTime: paymentTime,
+          status: 'CONFIRMED'
+        }
       })
     });
 
@@ -284,15 +285,15 @@ const sendCustomerConfirmationEmail = async (orderData, paymentData, email, form
     console.log('📧 Success email API response:', emailResult);
     
     if (emailResult.success) {
-      console.log(`✅ Success email sent to ${email}`);
+      console.log(`✅ Payment success email sent to ${email}`);
       return true;
     } else {
-      console.error(`❌ Failed to send success email:`, emailResult.error);
+      console.error(`❌ Failed to send success email:`, emailResult);
       return false;
     }
 
   } catch (error) {
-    console.error('❌ Error sending confirmation email:', error);
+    console.error('❌ Error sending payment success email:', error);
     return false;
   }
 };
