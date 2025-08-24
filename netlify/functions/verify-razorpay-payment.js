@@ -231,11 +231,13 @@ export const handler = async (event, context) => {
 };
 
 // ✅ REUSE SAME EMAIL LOGIC AS CASHFREE (adapted for Razorpay)
+// Replace the sendCustomerConfirmationEmail function in your verify-razorpay-payment.js
+
 const sendCustomerConfirmationEmail = async (orderData, paymentData, email, formId) => {
   try {
     console.log(`📧 Sending confirmation email to ${email}`);
 
-    // Get form and admin info (same as CashFree)
+    // Get form and admin info
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     
     const { data: formData, error: formError } = await supabase
@@ -253,23 +255,41 @@ const sendCustomerConfirmationEmail = async (orderData, paymentData, email, form
 
     const adminInfo = formData?.form_admins?.[0] || { name: 'PayForm Team' };
     const formName = formData?.form_name || 'Your Form';
+    const amount = orderData.amount / 100; // Convert from paise
 
-    // Adapt order data for email template
-    const emailOrderData = {
-      cf_order_id: orderData.id, // Use Razorpay order ID
-      order_amount: orderData.amount / 100, // Convert from paise
-      customer_details: {
-        customer_name: orderData.notes?.customer_name || email.split('@')[0],
-        customer_email: email
-      }
-    };
+    console.log('📋 Sending success email with amount:', amount);
 
-    // Generate confirmation email (reuse CashFree template)
-    const emailHtml = generateConfirmationEmailTemplate(emailOrderData, email, formName, adminInfo);
+    // 🚨 NEW: Use the same email sending method as the payment request emails
+    const emailResponse = await fetch(`${process.env.SUPABASE_URL}/functions/v1/send-payment-email`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+      },
+      body: JSON.stringify({
+        to: email,
+        subject: `Payment Successful - ${formName}`,
+        paymentLink: null, // No payment link needed for success emails
+        productName: formData?.product_name || 'Your Purchase',
+        amount: amount,
+        customerName: orderData.notes?.customer_name || email.split('@')[0],
+        adminId: formData?.admin_id,
+        isConfirmation: true, // 🚨 This tells the email function to send success template
+        transactionId: orderData.id,
+        paymentId: paymentData?.id || 'N/A'
+      })
+    });
+
+    const emailResult = await emailResponse.json();
+    console.log('📧 Success email API response:', emailResult);
     
-    // Here you can add actual email sending logic using your preferred service
-    console.log('📧 Email template generated for:', email);
-    return true;
+    if (emailResult.success) {
+      console.log(`✅ Success email sent to ${email}`);
+      return true;
+    } else {
+      console.error(`❌ Failed to send success email:`, emailResult.error);
+      return false;
+    }
 
   } catch (error) {
     console.error('❌ Error sending confirmation email:', error);
