@@ -232,7 +232,6 @@ export const handler = async (event, context) => {
 
 // ✅ REUSE SAME EMAIL LOGIC AS CASHFREE (adapted for Razorpay)
 // Replace the sendCustomerConfirmationEmail function in your verify-razorpay-payment.js
-
 // PERMANENT SIMPLE FIX: Replace sendCustomerConfirmationEmail function
 // This sends a proper success email using the same system as payment request emails
 
