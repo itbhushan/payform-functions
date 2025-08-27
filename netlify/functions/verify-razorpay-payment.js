@@ -235,6 +235,9 @@ export const handler = async (event, context) => {
 // PERMANENT SIMPLE FIX: Replace sendCustomerConfirmationEmail function
 // This sends a proper success email using the same system as payment request emails
 
+// CORRECTED VERSION: Replace sendCustomerConfirmationEmail function
+// This gets the real admin ID from the transaction
+
 const sendCustomerConfirmationEmail = async (orderData, paymentData, email, formId) => {
   try {
     console.log(`📧 Sending PAYMENT SUCCESS email to ${email}`);
@@ -248,7 +251,24 @@ const sendCustomerConfirmationEmail = async (orderData, paymentData, email, form
       timeStyle: 'short'
     });
 
-    // Create success email using the SAME method as payment emails
+    // Get the REAL admin ID from the transaction
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    
+    const { data: transaction, error: txnError } = await supabase
+      .from('transactions')
+      .select('admin_id, form_id')
+      .eq('razorpay_order_id', orderId)
+      .single();
+
+    if (txnError || !transaction) {
+      console.error('❌ Could not find transaction for admin ID:', txnError);
+      return false;
+    }
+
+    const realAdminId = transaction.admin_id;
+    console.log(`✅ Found real admin ID: ${realAdminId}`);
+
+    // Create success email using the REAL admin ID
     const emailResponse = await fetch(`${process.env.SUPABASE_URL}/functions/v1/send-payment-email`, {
       method: 'POST',
       headers: {
@@ -258,14 +278,12 @@ const sendCustomerConfirmationEmail = async (orderData, paymentData, email, form
       body: JSON.stringify({
         to: email,
         subject: `🎉 Payment Successful - ₹${amount} Confirmed`,
-        // Custom success template data
         paymentLink: null,
         productName: 'Your Purchase',
         amount: amount,
         customerName: customerName,
-        adminId: 'success',
+        adminId: realAdminId, // Use the REAL admin ID
         isConfirmation: true,
-        // Success-specific data
         transactionId: orderId,
         paymentDate: paymentTime,
         paymentMethod: 'Razorpay',
