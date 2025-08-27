@@ -238,6 +238,8 @@ export const handler = async (event, context) => {
 // CORRECTED VERSION: Replace sendCustomerConfirmationEmail function
 // This gets the real admin ID from the transaction
 
+// Replace the sendCustomerConfirmationEmail function in verify-razorpay-payment.js with this:
+
 const sendCustomerConfirmationEmail = async (orderData, paymentData, email, formId) => {
   try {
     console.log(`📧 Sending PAYMENT SUCCESS email to ${email}`);
@@ -256,7 +258,7 @@ const sendCustomerConfirmationEmail = async (orderData, paymentData, email, form
     
     const { data: transaction, error: txnError } = await supabase
       .from('transactions')
-      .select('admin_id, form_id')
+      .select('admin_id, form_id, product_name')
       .eq('razorpay_order_id', orderId)
       .single();
 
@@ -266,9 +268,12 @@ const sendCustomerConfirmationEmail = async (orderData, paymentData, email, form
     }
 
     const realAdminId = transaction.admin_id;
+    const productName = transaction.product_name || 'Your Purchase';
+    
     console.log(`✅ Found real admin ID: ${realAdminId}`);
+    console.log(`📧 Sending confirmation for product: ${productName}`);
 
-    // Create success email using the REAL admin ID
+    // Send success email with ALL required parameters for the updated Supabase function
     const emailResponse = await fetch(`${process.env.SUPABASE_URL}/functions/v1/send-payment-email`, {
       method: 'POST',
       headers: {
@@ -278,22 +283,23 @@ const sendCustomerConfirmationEmail = async (orderData, paymentData, email, form
       body: JSON.stringify({
         to: email,
         subject: `🎉 Payment Successful - ₹${amount} Confirmed`,
-        paymentLink: null,
-        productName: 'Your Purchase',
+        paymentLink: null, // Not needed for confirmation emails
+        productName: productName,
         amount: amount,
         customerName: customerName,
         adminId: realAdminId, // Use the REAL admin ID
-        isConfirmation: true,
+        
+        // SUCCESS EMAIL SPECIFIC FIELDS
+        isConfirmation: true, // This tells the function to use success template
         transactionId: orderId,
         paymentDate: paymentTime,
         paymentMethod: 'Razorpay',
-        successTemplate: {
-          orderId: orderId,
-          amount: amount,
-          customerName: customerName,
-          email: email,
-          paymentTime: paymentTime,
-          status: 'CONFIRMED'
+        
+        // Order data for the template
+        orderData: {
+          order_amount: amount,
+          razorpay_order_id: orderId,
+          order_id: orderId
         }
       })
     });
@@ -303,6 +309,7 @@ const sendCustomerConfirmationEmail = async (orderData, paymentData, email, form
     
     if (emailResult.success) {
       console.log(`✅ Payment success email sent to ${email}`);
+      console.log(`📧 Message ID: ${emailResult.messageId}`);
       return true;
     } else {
       console.error(`❌ Failed to send success email:`, emailResult);
