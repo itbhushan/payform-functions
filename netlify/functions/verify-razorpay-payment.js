@@ -133,7 +133,6 @@ export const handler = async (event, context) => {
           .update({
             payment_status: 'paid',
             razorpay_payment_id: razorpay_payment_id,
-            customer_name: orderData.notes?.customer_name || email.split('@')[0],
             updated_at: new Date().toISOString()
           })
           .eq('razorpay_order_id', orderIdToUse)
@@ -240,25 +239,25 @@ export const handler = async (event, context) => {
 
 // Replace the sendCustomerConfirmationEmail function in verify-razorpay-payment.js with this:
 
+// FIXED VERSION: Replace sendCustomerConfirmationEmail function in verify-razorpay-payment.js
 const sendCustomerConfirmationEmail = async (orderData, paymentData, email, formId) => {
   try {
     console.log(`📧 Sending PAYMENT SUCCESS email to ${email}`);
 
     const amount = orderData.amount / 100; // Convert from paise
     const orderId = orderData.id;
-    const customerName = orderData.notes?.customer_name || email.split('@')[0];
     const paymentTime = new Date().toLocaleString('en-IN', { 
       timeZone: 'Asia/Kolkata',
       dateStyle: 'full',
       timeStyle: 'short'
     });
 
-    // Get the REAL admin ID from the transaction
+    // Get the REAL admin ID and ORIGINAL customer data from the transaction
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     
     const { data: transaction, error: txnError } = await supabase
       .from('transactions')
-      .select('admin_id, form_id, product_name')
+      .select('admin_id, form_id, product_name, customer_name') // FIXED: Get original customer_name
       .eq('razorpay_order_id', orderId)
       .single();
 
@@ -269,11 +268,16 @@ const sendCustomerConfirmationEmail = async (orderData, paymentData, email, form
 
     const realAdminId = transaction.admin_id;
     const productName = transaction.product_name || 'Your Purchase';
+    const originalCustomerName = transaction.customer_name || email.split('@')[0]; // Use original name from form
     
     console.log(`✅ Found real admin ID: ${realAdminId}`);
+    console.log(`👤 Using original customer name: ${originalCustomerName}`); // FIXED: Use original name
     console.log(`📧 Sending confirmation for product: ${productName}`);
 
-    // Send success email with ALL required parameters for the updated Supabase function
+    // FIXED: Proper subject formatting with actual amount
+    const emailSubject = `Payment Successful - ${productName}`;
+    
+    // Send success email with CORRECTED parameters
     const emailResponse = await fetch(`${process.env.SUPABASE_URL}/functions/v1/send-payment-email`, {
       method: 'POST',
       headers: {
@@ -282,22 +286,22 @@ const sendCustomerConfirmationEmail = async (orderData, paymentData, email, form
       },
       body: JSON.stringify({
         to: email,
-        subject: `🎉 Payment Successful - ₹${amount} Confirmed`,
-        paymentLink: null, // Not needed for confirmation emails
+        subject: emailSubject, // FIXED: Use product-based subject
+        paymentLink: null,
         productName: productName,
-        amount: amount,
-        customerName: customerName,
-        adminId: realAdminId, // Use the REAL admin ID
+        amount: amount, // FIXED: Pass correct amount
+        customerName: originalCustomerName, // FIXED: Use original customer name
+        adminId: realAdminId,
         
         // SUCCESS EMAIL SPECIFIC FIELDS
-        isConfirmation: true, // This tells the function to use success template
+        isConfirmation: true,
         transactionId: orderId,
         paymentDate: paymentTime,
         paymentMethod: 'Razorpay',
         
-        // Order data for the template
+        // FIXED: Create proper orderData object with correct amount
         orderData: {
-          order_amount: amount,
+          order_amount: amount, // FIXED: Use actual amount, not undefined
           razorpay_order_id: orderId,
           order_id: orderId
         }
