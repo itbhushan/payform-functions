@@ -51,13 +51,41 @@ export const handler = async (event, context) => {
     }
 
     // Extract price from product name if needed
-    if (!product_price || product_price <= 1) {
-      const priceMatch = product_name?.match(/₹(\d+)/);
-      if (priceMatch) {
-        product_price = parseInt(priceMatch[1]);
-        console.log(`🔍 Extracted price: ₹${product_price} from product: ${product_name}`);
+// Enhanced price extraction and validation  
+let finalPrice = product_price;
+
+if (!finalPrice || finalPrice <= 1) {
+  console.log(`🔍 Extracting price from product_name: ${product_name}`);
+  
+  const pricePatterns = [
+    /₹(\d+)/,           // Match ₹1999
+    /-\s*₹(\d+)/,       // Match - ₹1999
+    /Rs\.?\s*(\d+)/i,   // Match Rs 1999 or Rs. 1999
+    /(\d{3,})/          // Match any 3+ digit number as fallback
+  ];
+  
+  for (const pattern of pricePatterns) {
+    const match = product_name?.match(pattern);
+    if (match && match[1]) {
+      const extracted = parseInt(match[1]);
+      if (extracted > 10) { // Only accept reasonable prices
+        finalPrice = extracted;
+        console.log(`✅ Extracted price: ₹${finalPrice} using pattern: ${pattern}`);
+        break;
       }
     }
+  }
+}
+
+// Validate final price
+if (!finalPrice || finalPrice <= 1) {
+  console.error(`❌ Invalid price detected: ${finalPrice}`);
+  throw new Error(`Invalid product price: ${finalPrice}. Product: ${product_name}`);
+}
+
+product_price = finalPrice;
+console.log(`💰 Final validated price: ₹${product_price}`);
+    
 
     // Resolve admin_id if missing
     if (!admin_id && form_id) {
