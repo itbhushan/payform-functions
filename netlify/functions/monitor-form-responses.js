@@ -78,10 +78,25 @@ const extractFormData = (response) => {
       product = value;
       
       // Extract price from product string
-      const priceMatch = value.match(/₹?(\d+)/);
-      if (priceMatch) {
-        productPrice = parseInt(priceMatch[1]);
-      }
+// Enhanced price extraction from product string
+const pricePatterns = [
+  /₹(\d+)/,           // Match ₹1999
+  /-\s*₹(\d+)/,       // Match - ₹1999  
+  /Rs\.?\s*(\d+)/i,   // Match Rs 1999
+  /(\d{3,})/          // Match any 3+ digit number as fallback
+];
+
+for (const pattern of pricePatterns) {
+  const match = value.match(pattern);
+  if (match && match[1]) {
+    const extracted = parseInt(match[1]);
+    if (extracted > 10) { // Only accept prices > ₹10
+      productPrice = extracted;
+      console.log(`✅ Extracted price: ₹${productPrice} from: ${value}`);
+      break;
+    }
+  }
+}
     }
     
     // Name detection (if no @ symbol and not a product)
