@@ -24,6 +24,7 @@ interface AuthContextType {
   connectGoogleAccount: () => Promise<{ success: boolean; error?: string }>;
   checkGoogleAuth: () => Promise<{ authenticated: boolean; needsRefresh?: boolean }>;
   googleAuthLoading: boolean;
+  emailVerificationRequired: boolean; // Add this
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -57,6 +58,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [emailVerificationRequired, setEmailVerificationRequired] = useState(false);
 
   // ✅ EMERGENCY FIX: Simplified profile loading with immediate fallback
   const loadUserProfile = async (userId: string, userEmail: string): Promise<AuthUser> => {
@@ -113,14 +115,22 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       setError(null);
       setSession(session);
 
-      if (session?.user) {
-        // ✅ CRITICAL: Don't set loading here to avoid infinite loop
-        const userProfile = await loadUserProfile(session.user.id, session.user.email!);
-        setUser(userProfile);
-        console.log('✅ User profile set successfully');
-      } else {
-        setUser(null);
-      }
+if (session?.user) {
+  // Check email verification status first
+  if (!session.user.email_confirmed_at) {
+    console.log('⚠️ User email not verified:', session.user.email);
+    setUser(null);
+    setError('Please check your email and click the verification link to complete registration.');
+    return;
+  }
+  
+  // Email is verified, proceed with profile loading
+  const userProfile = await loadUserProfile(session.user.id, session.user.email!);
+  setUser(userProfile);
+  console.log('✅ User profile set successfully');
+} else {
+  setUser(null);
+}
     } catch (error) {
       console.error('❌ Auth state change error:', error);
       // ✅ FALLBACK: Set basic user data even if profile loading fails
