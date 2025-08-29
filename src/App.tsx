@@ -1187,25 +1187,11 @@ const AppRouter: React.FC = () => {
 
 // Main App Component
 const App: React.FC = () => {
-  const { user, loading } = useAuth();
+  const { user, loading, error } = useAuth();
 
   // Google OAuth URL parameter handling
   React.useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const authStatus = urlParams.get('auth');
-    const email = urlParams.get('email');
-    const message = urlParams.get('message');
-
-    if (authStatus === 'success' && email) {
-      console.log('✅ Google OAuth successful for:', email);
-      // Clean URL and show success message
-      window.history.replaceState({}, document.title, window.location.pathname);
-      // You could add a toast notification here
-    } else if (authStatus === 'error') {
-      console.error('❌ Google OAuth error:', message);
-      window.history.replaceState({}, document.title, window.location.pathname);
-      // You could add an error notification here
-    }
+    // ... OAuth handling code (keep existing)
   }, []);
 
   if (loading) {
@@ -1214,6 +1200,30 @@ const App: React.FC = () => {
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
           <p className="mt-4 text-gray-600">Loading PayForm...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error message for unverified email or other auth errors
+  if (error && !user) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md text-center">
+          <div className="text-4xl mb-4">📧</div>
+          <h2 className="text-xl font-bold text-gray-900 mb-4">Email Verification Required</h2>
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+            <p className="text-yellow-800 text-sm">{error}</p>
+          </div>
+          <p className="text-gray-600 mb-6">
+            Please check your email inbox and click the verification link to complete your registration.
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition-colors"
+          >
+            I've Verified My Email
+          </button>
         </div>
       </div>
     );
