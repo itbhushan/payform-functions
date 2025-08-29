@@ -114,14 +114,14 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     try {
       setError(null);
       setSession(session);
-
 if (session?.user) {
   // Check email verification status first
   if (!session.user.email_confirmed_at) {
     console.log('⚠️ User email not verified:', session.user.email);
     setUser(null);
     setError('Please check your email and click the verification link to complete registration.');
-    return;
+    setLoading(false); // CRITICAL: Stop loading here
+    return; // Exit early, don't try to load profile
   }
   
   // Email is verified, proceed with profile loading
@@ -131,6 +131,7 @@ if (session?.user) {
 } else {
   setUser(null);
 }
+
     } catch (error) {
       console.error('❌ Auth state change error:', error);
       // ✅ FALLBACK: Set basic user data even if profile loading fails
