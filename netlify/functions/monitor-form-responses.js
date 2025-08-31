@@ -276,148 +276,130 @@ exports.handler = async (event, context) => {
 
         console.log(`📊 Already processed ${processedResponseIds.size} responses for this form`);
 
-        // Process each response
-        for (const response of responses) {
-          const responseId = response.responseId;
-          const sessionKey = `${form.form_id}-${responseId}`;
+     // NEW CODE - REPLACE with this enhanced duplicate prevention:
+for (const response of responses) {
+  try {
+    // Extract key response data
+    const responseData = response.values || [];
+    let customerEmail = '';
+    let customerName = '';
+    let productName = '';
+    let productPrice = 0;
 
-          // 🚨 CRITICAL FIX: Skip if already processed (database check)
-          if (processedResponseIds.has(responseId)) {
-            skippedAlreadyProcessed++;
-            continue;
+    // Extract email and other fields (adjust based on your form structure)
+    responseData.forEach((value, index) => {
+      if (typeof value === 'string') {
+        // Email detection
+        if (value.includes('@') && !customerEmail) {
+          customerEmail = value.trim().toLowerCase();
+        }
+        // Product detection
+        if (value.includes('₹') || value.includes('-')) {
+          productName = value;
+          // Extract price
+          const priceMatch = value.match(/₹(\d+)/);
+          if (priceMatch) {
+            productPrice = parseInt(priceMatch[1]);
           }
+        }
+        // Name detection (assuming it's not an email or product)
+        if (!value.includes('@') && !value.includes('₹') && !customerName && value.length > 2) {
+          customerName = value;
+        }
+      }
+    });
 
-          // Skip if already processed in this session
-          if (processedInSession.has(sessionKey)) {
-            continue;
-          }
+    if (!customerEmail || !productName || productPrice <= 0) {
+      console.log(`⚠️ Incomplete response data, skipping: ${customerEmail}`);
+      continue;
+    }
 
-          console.log(`🆕 Processing new response: ${responseId}`);
+    // CRITICAL: Check if this response was already processed
+    // Create a consistent response ID based on email and form
+    const responseId = `${formId}_${customerEmail}_${productName.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    
+    const { data: existingProcessed, error: processedError } = await supabase
+      .from('processed_form_responses')
+      .select('id')
+      .eq('form_id', formId)
+      .ilike('response_id', `%${customerEmail}%`);
 
-          // 🚨 CRITICAL FIX: Add to processedInSession immediately to prevent race conditions
-          processedInSession.add(sessionKey);
+    if (existingProcessed && existingProcessed.length > 0) {
+      console.log(`⏸️ Response already processed for: ${customerEmail}`);
+      continue;
+    }
 
-          // Mark as processing in database immediately to prevent duplicates
-          const { error: insertError } = await supabase
-            .from('processed_form_responses')
-            .insert({
-              response_id: responseId,
-              form_id: form.form_id,
-              status: 'processing',
-              processed_at: new Date().toISOString()
-            });
+    // Check if transaction already exists for this email+form in last 24 hours
+    const { data: existingTransaction, error: txError } = await supabase
+      .from('transactions')
+      .select('id')
+      .eq('form_id', formId)
+      .eq('email', customerEmail)
+      .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
 
-          if (insertError) {
-            console.log(`⚠️ Response ${responseId} might already be processing, skipping...`);
-            continue;
-          }
+    if (existingTransaction && existingTransaction.length > 0) {
+      console.log(`⏸️ Transaction already exists for: ${customerEmail}`);
+      
+      // Mark as processed to prevent future checking
+      await supabase
+        .from('processed_form_responses')
+        .insert([{
+          response_id: `${responseId}_duplicate_skip`,
+          form_id: formId,
+          status: 'duplicate_skipped',
+          processed_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          email_sent: false
+        }]);
+      
+      continue;
+    }
 
-          // Extract form data
-          const formData = extractFormData(response);
-          
-          if (!formData.email || !formData.product || formData.productPrice === 0) {
-            console.log('⚠️ Incomplete form data, skipping:', formData);
-            
-            // Update status to failed
-            await supabase
-              .from('processed_form_responses')
-              .update({ 
-                status: 'failed', 
-                error_message: 'Incomplete form data',
-                updated_at: new Date().toISOString()
-              })
-              .eq('response_id', responseId)
-              .eq('form_id', form.form_id);
-            
-            errors++;
-            continue;
-          }
+    console.log(`🆕 Processing new response: ${customerEmail} - ${productName}`);
 
-          console.log('📋 Extracted data:', formData);
+    // YOUR EXISTING PROCESSING LOGIC GOES HERE:
+    // - Create Razorpay/Cashfree order
+    // - Send payment email
+    // - Log transaction to database
+    
+    // Example (replace with your actual processing code):
+    const processingResult = await createOrderAndSendEmail({
+      customerEmail,
+      customerName,
+      productName,
+      productPrice,
+      formId,
+      adminId
+    });
 
-          // Create Razorpay order (using the same pattern as CashFree)
-          const orderResponse = await fetch(`${process.env.URL}/.netlify/functions/create-razorpay-order`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              form_id: form.form_id,
-              customer_email: formData.email,
-              customer_name: formData.name,
-              product_name: formData.product,
-              product_price: formData.productPrice,
-              admin_id: form.admin_id
-            })
-          });
+    // Mark as processed regardless of success/failure
+    await supabase
+      .from('processed_form_responses')
+      .insert([{
+        response_id: responseId,
+        form_id: formId,
+        status: processingResult.success ? 'completed' : 'failed',
+        processed_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        email_sent: processingResult.success,
+        razorpay_order_id: processingResult.orderId || null
+      }]);
 
-          const orderData = await orderResponse.json();
+    if (processingResult.success) {
+      processedCount++;
+      console.log(`✅ Successfully processed: ${customerEmail}`);
+    } else {
+      errorCount++;
+      console.log(`❌ Failed to process: ${customerEmail}`);
+    }
 
-          if (!orderData.success || !orderData.checkout_url) {
-            console.error('❌ Failed to create Razorpay order:', orderData.error);
-            
-            await supabase
-              .from('processed_form_responses')
-              .update({ 
-                status: 'failed', 
-                error_message: `Payment order creation failed: ${orderData.error}`,
-                updated_at: new Date().toISOString()
-              })
-              .eq('response_id', responseId)
-              .eq('form_id', form.form_id);
-            
-            errors++;
-            continue;
-          }
-
-          console.log('💳 Razorpay order created:', orderData.order_id);
-
-          // Send payment email using Supabase Edge Function (SAME AS CASHFREE)
-          const emailResult = await sendPaymentEmail(
-            formData.email,
-            formData.name,
-            formData.product,
-            formData.productPrice,
-            orderData.checkout_url,
-            form.admin_id,
-            orderData.order_id
-          );
-
-          if (emailResult.success) {
-            console.log(`📧 Payment email sent to ${formData.email}`);
-            emailsSent++;
-
-            // Update processing record with success
-            await supabase
-              .from('processed_form_responses')
-              .update({
-                status: 'completed',
-                razorpay_order_id: orderData.order_id,
-                email_sent: true,
-                email_message_id: emailResult.messageId,
-                updated_at: new Date().toISOString()
-              })
-              .eq('response_id', responseId)
-              .eq('form_id', form.form_id);
-
-          } else {
-            console.error(`❌ Failed to send email to ${formData.email}:`, emailResult.error);
-            
-            await supabase
-              .from('processed_form_responses')
-              .update({
-                status: 'failed',
-                error_message: `Email sending failed: ${emailResult.error}`,
-                razorpay_order_id: orderData.order_id,
-                updated_at: new Date().toISOString()
-              })
-              .eq('response_id', responseId)
-              .eq('form_id', form.form_id);
-            
-            errors++;
-          }
-
-          totalProcessed++;
-
-        } // End response processing loop
+  } catch (error) {
+    errorCount++;
+    console.error(`❌ Error processing response:`, error);
+  }
+}
 
       } catch (formError) {
         console.error(`❌ Error processing form ${form.form_name}:`, formError);
