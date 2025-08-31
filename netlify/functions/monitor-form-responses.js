@@ -280,18 +280,40 @@ exports.handler = async (event, context) => {
           }
 
           // Check if already processed in database
-          const { data: existingRecord } = await supabase
-            .from('processed_form_responses')
-            .select('id')
-            .eq('response_id', responseId)
-            .eq('form_id', form.form_id)
-            .single();
+// Check if already processed in database
+const { data: existingRecord } = await supabase
+  .from('processed_form_responses')
+  .select('id')
+  .eq('response_id', responseId)
+  .eq('form_id', form.form_id)
+  .single();
 
-          if (existingRecord) {
-            processedInSession.add(sessionKey);
-            continue;
-          }
+if (existingRecord) {
+  processedInSession.add(sessionKey);
+  continue;
+}
 
+// ADDITIONAL CHECK: Skip responses older than 1 hour to avoid processing historical data
+const responseTimestamp = new Date(response.createTime);
+const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+
+if (responseTimestamp < oneHourAgo) {
+  console.log(`⏸️ Skipping historical response from ${responseTimestamp}: ${responseId}`);
+  
+  // Mark as historical to prevent future processing
+  await supabase
+    .from('processed_form_responses')
+    .insert({
+      response_id: responseId,
+      form_id: form.form_id,
+      status: 'historical_skip',
+      processed_at: new Date().toISOString()
+    });
+  
+  processedInSession.add(sessionKey);
+  continue;
+}
+          
           console.log(`🆕 Processing new response: ${responseId}`);
 
           // Mark as processing immediately to prevent race conditions
