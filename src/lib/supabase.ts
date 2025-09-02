@@ -335,3 +335,56 @@ export const getLinkedAccountDetails = async (adminId: string) => {
     return null;
   }
 };
+
+// MISSING FUNCTIONS - Adding them back for MyForms.tsx compatibility
+
+// Extract Google Form ID from URL
+export const extractGoogleFormId = (url: string): string | null => {
+  try {
+    // Handle different Google Forms URL formats
+    const patterns = [
+      /\/forms\/d\/([a-zA-Z0-9-_]+)/,  // Standard format
+      /\/forms\/d\/e\/([a-zA-Z0-9-_]+)/, // Alternative format
+      /formResponse\?formkey=([a-zA-Z0-9-_]+)/, // Old format
+      /forms\.gle\/([a-zA-Z0-9-_]+)/ // Short URL format
+    ];
+    
+    for (const pattern of patterns) {
+      const match = url.match(pattern);
+      if (match) {
+        return match[1];
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error extracting form ID:', error);
+    return null;
+  }
+};
+
+// Fetch Google Form structure (placeholder - needs Google APIs)
+export const fetchGoogleFormStructure = async (formId: string) => {
+  // This function would typically use Google Forms API
+  // For now, return a placeholder structure
+  return {
+    title: 'Form Title',
+    fields: [
+      { title: 'Email', type: 'email', required: true },
+      { title: 'Name', type: 'text', required: true },
+      { title: 'Product', type: 'multiple_choice', required: true }
+    ]
+  };
+};
+
+// Test Google Form access (placeholder)
+export const testGoogleFormAccess = async (formId: string): Promise<boolean> => {
+  try {
+    // This would typically test access to the Google Form
+    // For now, return true as placeholder
+    return true;
+  } catch (error) {
+    console.error('Error testing Google Form access:', error);
+    return false;
+  }
+};
