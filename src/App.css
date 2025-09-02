@@ -61,7 +61,7 @@ const SetupWizard: React.FC = () => {
   const [activeStep, setActiveStep] = useState<'cashfree' | 'stripe' | 'discounts' | 'templates'>('cashfree');
 
   const steps = [
-    { id: 'cashfree', label: 'Cashfree Configuration', icon: '💳', component: CashfreeConfig, primary: true },
+    { id: 'payment', label: 'Payment Setup', icon: '💳', component: PaymentSetup, primary: true },
     { id: 'stripe', label: 'Stripe Configuration', icon: '🌐', component: StripeConfig, primary: false },
     { id: 'discounts', label: 'Discount Coupons', icon: '🎫', component: DiscountPlaceholder, primary: false },
     { id: 'templates', label: 'Message Templates', icon: '📧', component: TemplatePlaceholder, primary: false }
