@@ -1,23 +1,46 @@
-// netlify/functions/create-razorpay-order.js - ES MODULE VERSION
-import { createClient } from '@supabase/supabase-js';
-import Razorpay from 'razorpay';
+// netlify/functions/create-razorpay-order.js - UPGRADED FOR RAZORPAY ROUTE
+const { createClient } = require('@supabase/supabase-js');
+const Razorpay = require('razorpay');
 
+// Initialize Supabase
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// Initialize Razorpay
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
-export const handler = async (event, context) => {
+// Commission and fee calculation
+const calculatePaymentSplit = (amount) => {
+  // Razorpay fees: 2% + ₹3 + 18% GST
+  const baseRazorpayFee = (amount * 0.02) + 3;
+  const razorpayGST = baseRazorpayFee * 0.18;
+  const totalRazorpayFee = baseRazorpayFee + razorpayGST;
+  
+  // Platform commission: 3% of original amount
+  const platformCommission = amount * 0.03;
+  
+  // Form admin receives: Original amount - Razorpay fee - Platform commission
+  const formAdminAmount = amount - totalRazorpayFee - platformCommission;
+  
+  return {
+    totalAmount: amount,
+    razorpayFee: Number(totalRazorpayFee.toFixed(2)),
+    platformCommission: Number(platformCommission.toFixed(2)),
+    formAdminAmount: Number(formAdminAmount.toFixed(2))
+  };
+};
+
+exports.handler = async (event, context) => {
+  // CORS headers
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Content-Type': 'application/json'
   };
 
   if (event.httpMethod === 'OPTIONS') {
@@ -25,205 +48,169 @@ export const handler = async (event, context) => {
   }
 
   try {
-    console.log('🚀 Creating Razorpay payment order');
-    
-    const requestBody = JSON.parse(event.body || '{}');
-    console.log('📥 Request body:', requestBody);
+    console.log('🚀 Creating Razorpay Route order...');
+    const requestData = JSON.parse(event.body);
+    const { form_id, email, product_name, product_price } = requestData;
 
-    // Extract and validate data
-    let {
-      form_id,
-      customer_email,
-      customer_name,
-      product_name,
-      product_price,
-      admin_id,
-      form_admin_id
-    } = requestBody;
-
-    // Handle various input formats
-    if (!customer_email && requestBody.email) {
-      customer_email = requestBody.email;
-    }
-    
-    if (!admin_id && form_admin_id) {
-      admin_id = form_admin_id;
+    // Validate input
+    if (!form_id || !email || !product_name || !product_price) {
+      console.log('❌ Missing required fields');
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ error: 'Missing required fields' })
+      };
     }
 
-    // Extract price from product name if needed
-// Enhanced price extraction and validation  
-let finalPrice = product_price;
+    console.log(`📝 Order details:`, { form_id, email, product_name, product_price });
 
-if (!finalPrice || finalPrice <= 1) {
-  console.log(`🔍 Extracting price from product_name: ${product_name}`);
-  
-  const pricePatterns = [
-    /₹(\d+)/,           // Match ₹1999
-    /-\s*₹(\d+)/,       // Match - ₹1999
-    /Rs\.?\s*(\d+)/i,   // Match Rs 1999 or Rs. 1999
-    /(\d{3,})/          // Match any 3+ digit number as fallback
-  ];
-  
-  for (const pattern of pricePatterns) {
-    const match = product_name?.match(pattern);
-    if (match && match[1]) {
-      const extracted = parseInt(match[1]);
-      if (extracted > 10) { // Only accept reasonable prices
-        finalPrice = extracted;
-        console.log(`✅ Extracted price: ₹${finalPrice} using pattern: ${pattern}`);
-        break;
-      }
-    }
-  }
-}
-
-// Validate final price
-if (!finalPrice || finalPrice <= 1) {
-  console.error(`❌ Invalid price detected: ${finalPrice}`);
-  throw new Error(`Invalid product price: ${finalPrice}. Product: ${product_name}`);
-}
-
-product_price = finalPrice;
-console.log(`💰 Final validated price: ₹${product_price}`);
-    
-
-    // Resolve admin_id if missing
-    if (!admin_id && form_id) {
-      console.log('🔍 Resolving admin ID...');
-      const { data: formConfig } = await supabase
-        .from('form_configs')
-        .select('admin_id')
-        .eq('form_id', form_id)
-        .single();
-      
-      if (formConfig) {
-        admin_id = formConfig.admin_id;
-        console.log(`✅ Admin ID resolved: ${admin_id}`);
-      }
-    }
-
-    // Validate required fields
-    if (!customer_email) {
-      throw new Error('Customer email is required');
-    }
-    if (!product_price || product_price <= 0) {
-      throw new Error('Valid product price is required');
-    }
-    if (!admin_id) {
-      throw new Error('Admin ID is required');
-    }
-
-    // Set defaults
-    customer_name = customer_name || 'Customer';
-    product_name = product_name || 'Product';
-
-    console.log('✅ Validated data:', {
-      customer_email,
-      customer_name,
-      product_name,
-      product_price,
-      admin_id
-    });
-
-    // Calculate commission split
-    const totalAmount = parseFloat(product_price);
-    const gatewayFee = Math.round(((totalAmount * 0.025) + 3) * 100) / 100; // 2.5% + ₹3
-    const platformCommission = Math.round((totalAmount * 0.03) * 100) / 100; // 3%
-    const adminEarnings = Math.round((totalAmount - gatewayFee - platformCommission) * 100) / 100;
-
-    console.log('💰 Commission breakdown:', {
-      totalAmount,
-      gatewayFee,
-      platformCommission,
-      adminEarnings
-    });
-
-    // Create Razorpay order
-    const razorpayOrder = await razorpay.orders.create({
-      amount: Math.round(totalAmount * 100), // Amount in paise
-      currency: 'INR',
-      receipt: `receipt_${Date.now()}`,
-      notes: {
-        form_id: form_id || 'manual',
+    // Get form admin details and linked account
+    const { data: formConfig, error: formError } = await supabase
+      .from('form_configs')
+      .select(`
         admin_id,
-        customer_email,
-        product_name
-      }
-    });
-
-    console.log('✅ Razorpay order created:', razorpayOrder.id);
-
-    // Save transaction to database
-    const { data: transaction, error: dbError } = await supabase
-      .from('transactions')
-      .insert({
-        form_id: form_id || 'manual',
-        email: customer_email,
-        customer_name,
-        product_name,
-        payment_amount: totalAmount,
-        payment_currency: 'INR',
-        payment_status: 'pending',
-        payment_provider: 'razorpay',
-        razorpay_order_id: razorpayOrder.id,
-        gateway_fee: gatewayFee,
-        platform_commission: platformCommission,
-        net_amount_to_admin: adminEarnings,
-        admin_id,
-        created_at: new Date().toISOString()
-      })
-      .select()
+        form_admins!inner(id, email, name),
+        sub_account_applications!inner(verification_documents)
+      `)
+      .eq('form_id', form_id)
       .single();
 
-    if (dbError) {
-      console.error('❌ Database error:', dbError);
-      throw dbError;
+    if (formError || !formConfig) {
+      console.log('❌ Form config not found:', formError);
+      return {
+        statusCode: 404,
+        headers,
+        body: JSON.stringify({ error: 'Form configuration not found' })
+      };
     }
 
-    console.log('✅ Transaction saved to database:', transaction.id);
+    const linkedAccountId = formConfig.sub_account_applications?.verification_documents?.linked_account_id;
+    
+    if (!linkedAccountId) {
+      console.log('❌ Linked account not found for form admin');
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ error: 'Payment setup incomplete. Please complete payment setup first.' })
+      };
+    }
 
-    // Generate payment page URL (this fixes the 404 error)
-    const paymentPageUrl = `${process.env.URL}/.netlify/functions/payment-page?` +
-      `order_id=${razorpayOrder.id}&` +
-      `email=${encodeURIComponent(customer_email)}&` +
-      `amount=${totalAmount}&` +
-      `product_name=${encodeURIComponent(product_name)}&` +
-      `form_id=${form_id || 'manual'}`;
+    console.log(`🔗 Found linked account: ${linkedAccountId}`);
 
-    console.log('🔗 Payment page URL generated:', paymentPageUrl);
+    // Calculate payment splits
+    const splits = calculatePaymentSplit(product_price);
+    console.log('💰 Payment splits:', splits);
 
-    // Return success response
+    // Generate unique order ID
+    const orderId = `order_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+    // Create Razorpay order with Route transfers
+    const razorpayOrder = {
+      amount: product_price * 100, // Convert to paise
+      currency: 'INR',
+      receipt: orderId,
+      notes: {
+        form_id,
+        email,
+        product_name,
+        admin_id: formConfig.admin_id
+      },
+      transfers: [
+        {
+          account: linkedAccountId,
+          amount: splits.formAdminAmount * 100, // Convert to paise
+          currency: 'INR',
+          notes: {
+            purpose: 'Form admin payment for ' + product_name,
+            admin_email: formConfig.form_admins.email
+          },
+          linked_account_notes: [
+            'Payment for ' + product_name
+          ],
+          on_hold: 0 // Transfer immediately after payment capture
+        }
+      ]
+    };
+
+    console.log('📦 Creating Razorpay order with transfers...');
+    const order = await razorpay.orders.create(razorpayOrder);
+    console.log('✅ Razorpay order created:', order.id);
+
+    // Store transaction in database
+    const { error: dbError } = await supabase
+      .from('transactions')
+      .insert({
+        form_id,
+        email,
+        customer_name: 'Customer', // Will be updated after payment
+        product_name,
+        payment_amount: product_price,
+        payment_currency: 'INR',
+        payment_status: 'created',
+        payment_provider: 'razorpay_route',
+        transaction_id: order.id,
+        razorpay_order_id: order.id,
+        gateway_fee: splits.razorpayFee,
+        platform_commission: splits.platformCommission,
+        net_amount_to_admin: splits.formAdminAmount,
+        admin_id: formConfig.admin_id,
+        created_at: new Date().toISOString()
+      });
+
+    if (dbError) {
+      console.error('❌ Database insert error:', dbError);
+      // Continue anyway - the order was created in Razorpay
+    }
+
+    // Store commission tracking
+    await supabase
+      .from('platform_commissions')
+      .insert({
+        transaction_id: order.id,
+        form_admin_id: formConfig.admin_id,
+        commission_amount: splits.platformCommission,
+        commission_rate: 3.0,
+        platform_fee: splits.platformCommission,
+        gateway_fee: splits.razorpayFee,
+        net_amount_to_admin: splits.formAdminAmount,
+        status: 'pending',
+        created_at: new Date().toISOString()
+      });
+
+    console.log('💾 Transaction stored in database');
+
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: true,
-        order_id: razorpayOrder.id,
-        amount: totalAmount,
+        order_id: order.id,
+        amount: product_price,
         currency: 'INR',
-        checkout_url: paymentPageUrl, // This fixes the 404 error!
-        transaction_id: transaction.id,
-        customer_email,
-        product_name,
-        commission_breakdown: {
-          total_amount: totalAmount,
-          gateway_fee: gatewayFee,
-          platform_commission: platformCommission,
-          admin_earnings: adminEarnings
+        checkout_url: `https://checkout.razorpay.com/v1/checkout.js?key_id=${process.env.RAZORPAY_KEY_ID}&order_id=${order.id}`,
+        splits: {
+          total_amount: splits.totalAmount,
+          razorpay_fee: splits.razorpayFee,
+          platform_commission: splits.platformCommission,
+          form_admin_amount: splits.formAdminAmount
+        },
+        notes: {
+          form_id,
+          email,
+          product_name,
+          admin_email: formConfig.form_admins.email
         }
       })
     };
 
   } catch (error) {
-    console.error('❌ Razorpay order creation failed:', error);
-    
+    console.error('❌ Error creating Razorpay Route order:', error);
     return {
       statusCode: 500,
       headers,
-      body: JSON.stringify({
-        success: false,
-        error: error.message,
-        details: error.toString()
+      body: JSON.stringify({ 
+        error: 'Failed to create payment order',
+        details: error.message 
       })
     };
   }
