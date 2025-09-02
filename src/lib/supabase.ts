@@ -4,10 +4,6 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://ofzhgpjqmtngrpnltegl.supabase.co';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9memhncGpxbXRuZ3Jwbmx0ZWdsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAyNTIxODAsImV4cCI6MjA2NTgyODE4MH0.PQOaTOHfGJqhfr6ariJWNgf64qHuDzMbgKLoMAaOM1c';
 
-// Debug logging (remove in production)
-console.log('Supabase URL:', supabaseUrl);
-console.log('Supabase Key exists:', !!supabaseAnonKey);
-
 // Create Supabase client
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
@@ -16,7 +12,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   }
 });
 
-// Enhanced Types for Cashfree Integration
+// Enhanced Types for Razorpay Route Integration
 export interface Transaction {
   id: number;
   form_id: string;
@@ -30,9 +26,9 @@ export interface Transaction {
   transaction_id: string;
   discount_code?: string;
   discount_amount?: number;
-  // Cashfree specific fields
-  cashfree_order_id?: string;
-  cashfree_payment_id?: string;
+  // Razorpay Route specific fields
+  razorpay_order_id?: string;
+  razorpay_payment_id?: string;
   gateway_fee?: number;
   platform_commission?: number;
   net_amount_to_admin?: number;
@@ -48,17 +44,18 @@ export interface FormAdmin {
   company_name?: string;
   created_at: string;
   is_active: boolean;
+  payment_setup_complete?: boolean;
 }
 
 export interface ProviderConfig {
   id: string;
   admin_id: string;
-  provider_name: 'stripe' | 'cashfree' | 'razorpay' | 'paypal';
+  provider_name: 'stripe' | 'razorpay' | 'razorpay_route' | 'cashfree' | 'paypal';
   is_enabled: boolean;
   config_data: any;
-  // Cashfree specific fields
-  cashfree_sub_account_id?: string;
-  cashfree_sub_account_status?: 'pending' | 'approved' | 'rejected';
+  // Razorpay Route specific fields
+  razorpay_linked_account_id?: string;
+  razorpay_account_status?: 'created' | 'activated' | 'suspended';
   onboarding_complete?: boolean;
   verification_status?: 'pending' | 'verified' | 'rejected';
   created_at: string;
@@ -67,7 +64,7 @@ export interface ProviderConfig {
 
 export interface PlatformCommission {
   id: string;
-  transaction_id: number;
+  transaction_id: string; // Changed to string for Razorpay order IDs
   form_admin_id: string;
   commission_amount: number;
   commission_rate: number;
@@ -75,7 +72,7 @@ export interface PlatformCommission {
   gateway_fee: number;
   net_amount_to_admin: number;
   status: 'pending' | 'completed' | 'failed';
-  cashfree_transfer_id?: string;
+  razorpay_transfer_id?: string;
   processed_at?: string;
   created_at: string;
 }
@@ -89,8 +86,15 @@ export interface SubAccountApplication {
   bank_account_number?: string;
   ifsc_code?: string;
   account_holder_name?: string;
+  business_name?: string; // NEW FIELD
   business_type?: string;
-  verification_documents?: any;
+  verification_documents?: {
+    pan_number?: string;
+    gst_number?: string;
+    upi_id?: string; // NEW FIELD
+    linked_account_id?: string; // NEW FIELD
+    payment_method?: 'bank' | 'upi'; // NEW FIELD
+  };
   rejection_reason?: string;
   created_at: string;
   updated_at: string;
@@ -98,23 +102,57 @@ export interface SubAccountApplication {
 
 export interface PaymentSplit {
   id: string;
-  transaction_id: number;
-  cashfree_order_id: string;
+  transaction_id: string;
+  razorpay_order_id: string;
   total_amount: number;
   gateway_fee: number;
   platform_commission: number;
   form_admin_amount: number;
   form_admin_id: string;
   split_status: 'pending' | 'processing' | 'completed' | 'failed';
-  cashfree_split_response?: any;
+  razorpay_transfer_id?: string;
+  razorpay_split_response?: any;
   created_at: string;
 }
 
-export interface CashfreeConfig {
-  app_id: string;
-  secret_key: string;
-  environment: 'sandbox' | 'production';
+// NEW: Razorpay Route specific types
+export interface RazorpayRouteConfig {
+  key_id: string;
+  key_secret: string;
+  environment: 'test' | 'live';
+  webhook_secret?: string;
   webhook_url?: string;
+  linked_account_id?: string;
+}
+
+export interface RazorpayLinkedAccount {
+  id: string;
+  admin_id: string;
+  razorpay_account_id: string;
+  account_status: 'created' | 'activated' | 'needs_clarification' | 'suspended';
+  reference_id: string;
+  legal_business_name: string;
+  business_type: string;
+  contact_name: string;
+  email: string;
+  phone?: string;
+  profile: {
+    category: string;
+    subcategory: string;
+  };
+  legal_info: {
+    pan: string;
+    gst?: string;
+  };
+  bank_accounts?: Array<{
+    id: string;
+    ifsc: string;
+    account_number: string;
+    beneficiary_name: string;
+    status: 'created' | 'activated';
+  }>;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface FormAdminEarnings {
@@ -129,78 +167,71 @@ export interface FormAdminEarnings {
   avg_transaction_value: number;
 }
 
-// Cashfree API Types
-export interface CashfreeOrderRequest {
-  order_amount: number;
-  order_currency: string;
-  order_id: string;
-  customer_details: {
-    customer_id: string;
-    customer_name?: string;
-    customer_email: string;
-    customer_phone?: string;
+// NEW: Razorpay Route API Types
+export interface RazorpayRouteOrderRequest {
+  amount: number;
+  currency: string;
+  receipt: string;
+  notes?: {
+    form_id: string;
+    email: string;
+    product_name: string;
+    admin_id: string;
   };
-  order_meta?: {
-    return_url?: string;
-    notify_url?: string;
-    payment_methods?: string;
-  };
-  order_splits?: Array<{
-    vendor_id: string;
+  transfers: Array<{
+    account: string;
     amount: number;
-    percentage?: number;
+    currency: string;
+    notes?: any;
+    linked_account_notes?: string[];
+    on_hold?: number;
   }>;
 }
 
-export interface CashfreeOrderResponse {
-  cf_order_id: string;
-  order_id: string;
-  entity: string;
-  order_currency: string;
-  order_amount: number;
-  order_status: string;
-  payment_session_id: string;
-  order_token: string;
-}
-
-export interface CashfreePaymentResponse {
-  cf_payment_id: string;
-  order_id: string;
-  entity: string;
-  payment_currency: string;
-  payment_amount: number;
-  payment_status: string;
-  payment_method: string;
-  payment_time: string;
-}
-
-// ADD these new interfaces after the existing ones:
-export interface FormFieldMapping {
+export interface RazorpayRouteOrderResponse {
   id: string;
-  form_id: string;
-  admin_id: string;
-  email_field_id?: string;
-  product_field_id?: string;
-  name_field_id?: string;
-  phone_field_id?: string;
-  created_at: string;
-  updated_at: string;
+  entity: string;
+  amount: number;
+  amount_paid: number;
+  amount_due: number;
+  currency: string;
+  receipt: string;
+  status: string;
+  attempts: number;
+  notes: any;
+  created_at: number;
+  transfers?: Array<{
+    id: string;
+    entity: string;
+    source: string;
+    recipient: string;
+    amount: number;
+    currency: string;
+    status: string;
+  }>;
 }
 
-export interface GoogleFormQuestion {
-  questionId: string;
-  title: string;
-  type: string;
-  required: boolean;
+export interface RazorpayRoutePaymentResponse {
+  id: string;
+  entity: string;
+  amount: number;
+  currency: string;
+  status: string;
+  order_id: string;
+  method: string;
+  amount_refunded: number;
+  captured: boolean;
   description?: string;
-  choices?: string[];
-}
-
-export interface GoogleFormStructure {
-  formId: string;
-  title: string;
-  description?: string;
-  questions: GoogleFormQuestion[];
+  card_id?: string;
+  bank?: string;
+  wallet?: string;
+  vpa?: string;
+  email: string;
+  contact: string;
+  notes: any;
+  fee?: number;
+  tax?: number;
+  created_at: number;
 }
 
 // Utility Functions
@@ -219,19 +250,25 @@ export const testSupabaseConnection = async () => {
   }
 };
 
-// Commission Calculation Utility
-export const calculateCommissionSplit = (
+// NEW: Razorpay Route Commission Calculation
+export const calculateRazorpayRouteCommissionSplit = (
   totalAmount: number, 
-  commissionRate: number = 3.0,
-  gatewayFeeRate: number = 2.0,
-  fixedGatewayFee: number = 3.0
+  platformCommissionRate: number = 3.0
 ) => {
-  const gatewayFee = (totalAmount * gatewayFeeRate / 100) + fixedGatewayFee;
-  const platformCommission = totalAmount * commissionRate / 100;
-  const formAdminAmount = totalAmount - gatewayFee - platformCommission;
+  // Razorpay fees: 2% + ₹3 + 18% GST
+  const baseRazorpayFee = (totalAmount * 0.02) + 3;
+  const razorpayGST = baseRazorpayFee * 0.18;
+  const totalRazorpayFee = baseRazorpayFee + razorpayGST;
+  
+  // Platform commission (percentage of total amount)
+  const platformCommission = totalAmount * (platformCommissionRate / 100);
+  
+  // Form admin gets remainder after all deductions
+  const formAdminAmount = totalAmount - totalRazorpayFee - platformCommission;
   
   return {
-    gatewayFee: Number(gatewayFee.toFixed(2)),
+    totalAmount: Number(totalAmount.toFixed(2)),
+    razorpayFee: Number(totalRazorpayFee.toFixed(2)),
     platformCommission: Number(platformCommission.toFixed(2)),
     formAdminAmount: Number(formAdminAmount.toFixed(2))
   };
@@ -256,149 +293,45 @@ export const formatDate = (dateString: string) => {
   }).format(new Date(dateString));
 };
 
-// ADD these new utility functions:
-// Fetch Google Form structure via our API
-
-export const fetchGoogleFormStructure = async (formId: string, adminId?: string): Promise<GoogleFormStructure | null> => {
+// NEW: Check if form admin has completed Razorpay Route setup
+export const checkPaymentSetupComplete = async (adminId: string): Promise<boolean> => {
   try {
-    console.log('🔍 Fetching form structure for:', formId, 'Admin:', adminId);
-    
-    if (!adminId) {
-      console.error('❌ Admin ID is required for form structure access');
-      throw new Error('Admin ID is required for Google Forms access');
-    }
-    
-    const response = await fetch('/.netlify/functions/google-forms-api', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify({ 
-        action: 'getFormStructure', 
-        formId: formId,
-        adminId: adminId  // This matches what the function expects
-      })
-    });
-    
-    console.log('📡 API Response status:', response.status);
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ API Error:', response.status, errorText);
-      
-      // Handle specific error cases
-      if (response.status === 401) {
-        throw new Error('Google authentication required. Please connect your Google account.');
-      } else if (response.status === 403) {
-        throw new Error('Access denied. Please ensure you have permission to access this form.');
-      } else if (response.status === 404) {
-        throw new Error('Form not found. Please check the form URL.');
-      } else {
-        throw new Error(`API Error: ${response.status} ${errorText}`);
-      }
-    }
-    
-    const result = await response.json();
-    console.log('✅ API Result:', result);
-    
-    if (!result.success) {
-      throw new Error(result.error || 'Failed to fetch form structure');
-    }
-    
-    return result.data;
-  } catch (error) {
-    console.error('❌ Error fetching form structure:', error);
-    throw error; // Re-throw to let the calling function handle it
-  }
-};
+    const { data, error } = await supabase
+      .from('provider_configs')
+      .select('is_enabled, verification_status')
+      .eq('admin_id', adminId)
+      .eq('provider_name', 'razorpay_route')
+      .single();
 
-// Test Google Form access
-
-export const testGoogleFormAccess = async (formId: string, adminId?: string): Promise<boolean> => {
-  try {
-    if (!adminId) {
-      console.error('❌ Admin ID is required for form access test');
+    if (error || !data) {
       return false;
     }
-    
-    const response = await fetch('/.netlify/functions/google-forms-api', {
-      method: 'POST',  
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        action: 'testFormAccess', 
-        formId,
-        adminId  // Add adminId parameter
-      })
-    });
-    
-    const result = await response.json();
-    return result.success;
+
+    return data.is_enabled && data.verification_status === 'verified';
   } catch (error) {
-    console.error('Error testing form access:', error);
+    console.error('Error checking payment setup:', error);
     return false;
   }
 };
 
-// Extract Google Form ID from various URL formats
-export const extractGoogleFormId = (url: string): string | null => {
-  console.log('🔍 Extracting Form ID from URL:', url);
-  
-  // PRIORITY ORDER: Edit URLs first (most reliable)
-  const patterns = [
-    // 1. Edit form (HIGHEST PRIORITY): /forms/d/FORM_ID/edit
-    {
-      pattern: /\/forms\/d\/([a-zA-Z0-9-_]{25,})\/edit/,
-      type: 'edit',
-      priority: 1
-    },
-    // 2. Direct form access: /forms/d/FORM_ID/
-    {
-      pattern: /\/forms\/d\/([a-zA-Z0-9-_]{25,})\/?$/,
-      type: 'direct',
-      priority: 2
-    },
-    // 3. View form: /forms/d/FORM_ID/viewform (older format)
-    {
-      pattern: /\/forms\/d\/([a-zA-Z0-9-_]{25,})\/viewform/,
-      type: 'view',
-      priority: 3
+// NEW: Get form admin's linked account details
+export const getLinkedAccountDetails = async (adminId: string) => {
+  try {
+    const { data, error } = await supabase
+      .from('sub_account_applications')
+      .select('verification_documents')
+      .eq('form_admin_id', adminId)
+      .eq('provider_name', 'razorpay_route')
+      .eq('application_status', 'approved')
+      .single();
+
+    if (error || !data) {
+      return null;
     }
-  ];
-  
-  // Check patterns in priority order
-  for (const { pattern, type, priority } of patterns) {
-    const match = url.match(pattern);
-    
-    if (match && match[1]) {
-      const extractedId = match[1];
-      console.log(`✅ Form ID found using ${type} URL pattern (priority ${priority}):`, extractedId);
-      
-      if (type === 'edit') {
-        console.log('🎯 Perfect! Edit URL detected - this is the most reliable format.');
-      } else {
-        console.warn(`⚠️ Using ${type} URL format. Edit URL is recommended for best reliability.`);
-      }
-      
-      return extractedId;
-    }
+
+    return data.verification_documents?.linked_account_id || null;
+  } catch (error) {
+    console.error('Error getting linked account details:', error);
+    return null;
   }
-  
-  // Check for problematic response URLs and provide clear error
-  const responseUrlPattern = /\/forms\/d\/e\/([a-zA-Z0-9-_]{25,})\/viewform/;
-  const responseMatch = url.match(responseUrlPattern);
-  
-  if (responseMatch) {
-    console.error('❌ INVALID URL TYPE: This is a response/published form URL');
-    console.error('💡 SOLUTION: Please use the EDIT URL instead');
-    console.error('📝 How to get edit URL:');
-    console.error('   1. Go to https://forms.google.com');
-    console.error('   2. Find your form and click the EDIT button (pencil icon)');
-    console.error('   3. Copy the URL from address bar (should end with /edit)');
-    throw new Error('Invalid URL: Please use the form EDIT URL, not the response URL. Go to forms.google.com, open your form for editing, and copy that URL.');
-  }
-  
-  console.error('❌ No valid Google Form ID found in URL');
-  console.error('💡 Expected URL format: https://docs.google.com/forms/d/FORM_ID/edit');
-  throw new Error('Invalid Google Form URL format. Please use the edit URL from forms.google.com');
 };
