@@ -347,19 +347,18 @@ if (responseTimestamp < oneHourAgo) {
           console.log('📋 Extracted data:', formData);
 
           // Create Razorpay order (using the same pattern as CashFree)
-          const orderResponse = await fetch(`${process.env.URL}/.netlify/functions/create-razorpay-order`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              form_id: form.form_id,
-              customer_email: formData.email,
-              customer_name: formData.name,
-              product_name: formData.product,
-              product_price: formData.productPrice,
-              admin_id: form.admin_id
-            })
-          });
-
+// Create Razorpay order (using the same pattern as CashFree)
+const orderResponse = await fetch(`${process.env.URL}/.netlify/functions/create-razorpay-order`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    form_id: form.form_id,
+    email: formData.email,
+    product_name: formData.product,
+    product_price: formData.productPrice
+  })
+});
+          
           const orderData = await orderResponse.json();
 
           if (!orderData.success || !orderData.checkout_url) {
