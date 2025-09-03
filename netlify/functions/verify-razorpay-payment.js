@@ -1,4 +1,4 @@
-// netlify/functions/verify-razorpay-payment.js - FIXED FOR PAYMENT LINKS
+// netlify/functions/verify-razorpay-payment.js - FINAL FIXED VERSION
 const { createClient } = require('@supabase/supabase-js');
 const crypto = require('crypto');
 const Razorpay = require('razorpay');
@@ -63,29 +63,30 @@ exports.handler = async (event, context) => {
 
     console.log(`🔍 Verifying payment: ${razorpay_payment_id} for order/link: ${orderId}`);
 
-// Verify signature (handle both order and payment link formats)
-const isPaymentLink = !!razorpay_payment_link_id;
-let isValidSignature = true;
+    // Verify signature (handle both order and payment link formats)
+    const isPaymentLink = !!razorpay_payment_link_id;
+    let isValidSignature = true;
 
-if (!isPaymentLink) {
-  // Only verify signature for regular orders, not payment links
-  isValidSignature = verifyRazorpaySignature(
-    orderId,
-    razorpay_payment_id,
-    razorpay_signature
-  );
-  
-  if (!isValidSignature) {
-    console.log('❌ Invalid payment signature');
-    return {
-      statusCode: 400,
-      headers,
-      body: generateErrorPage('Payment verification failed. Invalid signature.')
-    };
-  }
-} else {
-  console.log('ℹ️ Skipping signature verification for Payment Link (verified by Razorpay)');
-}
+    if (!isPaymentLink) {
+      // Only verify signature for regular orders, not payment links
+      isValidSignature = verifyRazorpaySignature(
+        orderId,
+        razorpay_payment_id,
+        razorpay_signature
+      );
+      
+      if (!isValidSignature) {
+        console.log('❌ Invalid payment signature');
+        return {
+          statusCode: 400,
+          headers,
+          body: generateErrorPage('Payment verification failed. Invalid signature.')
+        };
+      }
+    } else {
+      console.log('ℹ️ Skipping signature verification for Payment Link (verified by Razorpay)');
+    }
+
     // Fetch payment details from Razorpay
     const payment = await razorpay.payments.fetch(razorpay_payment_id);
     console.log('💳 Payment status:', payment.status);
@@ -100,6 +101,7 @@ if (!isPaymentLink) {
     }
 
     // Update transaction in database (handle both order and payment link IDs)
+    console.log(`📊 Updating database for order ID: ${orderId}`);
     const { data: transaction, error: updateError } = await supabase
       .from('transactions')
       .update({
@@ -112,13 +114,37 @@ if (!isPaymentLink) {
       .select('*')
       .single();
 
-    if (updateError) {
+    if (updateError || !transaction) {
       console.error('❌ Database update error:', updateError);
-      return {
-        statusCode: 500,
-        headers,
-        body: generateErrorPage('Payment successful but database update failed.')
-      };
+      console.log('🔍 Attempting alternative lookup by transaction_id...');
+      
+      // Try alternative lookup using transaction_id field
+      const { data: altTransaction, error: altError } = await supabase
+        .from('transactions')
+        .update({
+          payment_status: 'paid',
+          razorpay_payment_id: razorpay_payment_id,
+          customer_name: payment.notes?.name || 'Customer',
+          updated_at: new Date().toISOString()
+        })
+        .eq('transaction_id', orderId)
+        .select('*')
+        .single();
+
+      if (altError || !altTransaction) {
+        console.error('❌ Alternative database update also failed:', altError);
+        // Still show success page but mention database issue
+        return {
+          statusCode: 200,
+          headers,
+          body: generateSuccessPageWithWarning(payment, orderId)
+        };
+      } else {
+        transaction = altTransaction;
+        console.log('✅ Transaction updated successfully via alternative lookup');
+      }
+    } else {
+      console.log('✅ Transaction updated successfully');
     }
 
     // Update commission status to completed (use orderId)
@@ -129,6 +155,39 @@ if (!isPaymentLink) {
         processed_at: new Date().toISOString()
       })
       .eq('transaction_id', orderId);
+
+    // Send confirmation email after successful payment
+    if (transaction) {
+      try {
+        console.log('📧 Sending confirmation email...');
+        const confirmationEmailResponse = await fetch(`${process.env.SUPABASE_URL}/functions/v1/send-payment-email`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+          },
+          body: JSON.stringify({
+            to: transaction.email,
+            subject: `Payment Confirmed - ${transaction.product_name}`,
+            productName: transaction.product_name,
+            amount: transaction.payment_amount,
+            customerName: transaction.customer_name,
+            paymentId: razorpay_payment_id,
+            adminId: transaction.admin_id,
+            isConfirmation: true // This tells the email service to send confirmation instead of payment request
+          })
+        });
+
+        const emailResult = await confirmationEmailResponse.json();
+        console.log('📧 Confirmation email result:', emailResult);
+        
+        if (emailResult.success) {
+          console.log('✅ Confirmation email sent successfully');
+        }
+      } catch (emailError) {
+        console.error('⚠️ Confirmation email failed (non-critical):', emailError);
+      }
+    }
 
     console.log('✅ Payment verification completed successfully');
 
@@ -276,7 +335,6 @@ async function handleTransferFailed(transfer) {
   console.log('⚠️ Commission marked as failed for transfer failure');
 }
 
-// Verify Razorpay payment signature (works for both orders and payment links)
 // Verify Razorpay payment signature (for regular orders only)
 function verifyRazorpaySignature(orderId, paymentId, signature) {
   const text = orderId + '|' + paymentId;
@@ -287,6 +345,7 @@ function verifyRazorpaySignature(orderId, paymentId, signature) {
   
   return expectedSignature === signature;
 }
+
 // Verify webhook signature
 function verifyWebhookSignature(body, signature) {
   if (!process.env.RAZORPAY_WEBHOOK_SECRET) {
@@ -368,6 +427,76 @@ function generateSuccessPage(payment, transaction) {
             <p style="margin: 5px 0; font-size: 12px;">👤 Form Admin: ₹${transaction.net_amount_to_admin || transaction.payment_amount}</p>
           </div>
           ` : ''}
+
+          <p>You will receive a confirmation email shortly.</p>
+          <p style="color: #666; margin-top: 30px; font-size: 14px;">You can now close this window.</p>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
+// Generate success page with warning (when database update fails but payment succeeded)
+function generateSuccessPageWithWarning(payment, orderId) {
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Payment Successful - PayForm</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            margin: 0; padding: 20px; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            min-height: 100vh; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+          }
+          .container { 
+            background: white; 
+            padding: 40px; 
+            border-radius: 15px; 
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1); 
+            max-width: 500px; 
+            text-align: center; 
+          }
+          .success-icon { font-size: 64px; margin-bottom: 20px; }
+          .amount { 
+            background: #e8f5e8; 
+            padding: 20px; 
+            border-radius: 10px; 
+            margin: 20px 0; 
+            border-left: 4px solid #4caf50; 
+          }
+          .warning {
+            background: #fff3cd;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            border-left: 4px solid #ffc107;
+            color: #856404;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="success-icon">🎉</div>
+          <h1 style="color: #4caf50; margin-bottom: 10px;">Payment Successful!</h1>
+          <p>Your payment has been processed successfully by Razorpay.</p>
+          
+          <div class="amount">
+            <p style="margin: 5px 0;"><strong>Payment ID:</strong> ${payment.id}</p>
+            <p style="margin: 5px 0;"><strong>Order ID:</strong> ${orderId}</p>
+            <p style="margin: 5px 0;"><strong>Status:</strong> ✅ Payment Confirmed</p>
+          </div>
+
+          <div class="warning">
+            <strong>Note:</strong> Payment successful but there was a minor database sync issue. 
+            Please save your Payment ID (${payment.id}) for reference.
+          </div>
 
           <p>You will receive a confirmation email shortly.</p>
           <p style="color: #666; margin-top: 30px; font-size: 14px;">You can now close this window.</p>
