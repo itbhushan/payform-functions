@@ -64,12 +64,15 @@ exports.handler = async (event, context) => {
     console.log(`🔍 Verifying payment: ${razorpay_payment_id} for order/link: ${orderId}`);
 
     // Verify signature (handle both order and payment link formats)
-    const isValidSignature = verifyRazorpaySignature(
-      orderId,
-      razorpay_payment_id,
-      razorpay_signature
-    );
-
+// Verify signature (handle both order and payment link formats)
+const isPaymentLink = !!razorpay_payment_link_id;
+const isValidSignature = verifyRazorpaySignature(
+  orderId,
+  razorpay_payment_id,
+  razorpay_signature,
+  isPaymentLink,
+  referenceId
+);
     if (!isValidSignature) {
       console.log('❌ Invalid payment signature');
       return {
@@ -270,12 +273,30 @@ async function handleTransferFailed(transfer) {
 }
 
 // Verify Razorpay payment signature (works for both orders and payment links)
-function verifyRazorpaySignature(orderId, paymentId, signature) {
-  const text = orderId + '|' + paymentId;
+// Verify Razorpay payment signature (works for both orders and payment links)
+function verifyRazorpaySignature(orderId, paymentId, signature, isPaymentLink = false, referenceId = null) {
+  let text;
+  
+  if (isPaymentLink && referenceId !== null) {
+    // For Payment Links: payment_link_id + "|" + payment_link_status + "|" + payment_link_reference_id + "|" + payment_id
+    text = orderId + '|' + 'paid' + '|' + referenceId + '|' + paymentId;
+  } else if (isPaymentLink) {
+    // Fallback for Payment Links without reference ID
+    text = orderId + '|' + paymentId;
+  } else {
+    // For regular orders: order_id + "|" + payment_id
+    text = orderId + '|' + paymentId;
+  }
+  
+  console.log(`🔍 Signature verification text: ${text}`);
+  
   const expectedSignature = crypto
     .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
     .update(text)
     .digest('hex');
+  
+  console.log(`🔍 Expected signature: ${expectedSignature}`);
+  console.log(`🔍 Received signature: ${signature}`);
   
   return expectedSignature === signature;
 }
