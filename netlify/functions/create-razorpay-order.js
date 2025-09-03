@@ -114,19 +114,19 @@ exports.handler = async (event, context) => {
           created_at: new Date().toISOString()
         });
 
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({
-          success: true,
-          order_id: basicOrder.id,
-          amount: product_price,
-          currency: 'INR',
-          checkout_url: `https://checkout.razorpay.com/v1/checkout.js?key_id=${process.env.RAZORPAY_KEY_ID}&order_id=${basicOrder.id}`,
-          warning: 'Payment setup incomplete. Using basic payment processing.',
-          message: 'Form admin needs to complete Payment Setup for automatic splitting.'
-        })
-      };
+return {
+  statusCode: 200,
+  headers,
+  body: JSON.stringify({
+    success: true,
+    order_id: basicOrder.id,
+    amount: product_price,
+    currency: 'INR',
+    checkout_url: `https://rzp.io/l/${basicOrder.id}`,
+    warning: 'Payment setup incomplete. Using basic payment processing.',
+    message: 'Form admin needs to complete Payment Setup for automatic splitting.'
+  })
+};
     }
 
     // If we reach here, payment setup is complete - proceed with Route
