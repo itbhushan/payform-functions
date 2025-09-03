@@ -63,25 +63,29 @@ exports.handler = async (event, context) => {
 
     console.log(`🔍 Verifying payment: ${razorpay_payment_id} for order/link: ${orderId}`);
 
-    // Verify signature (handle both order and payment link formats)
 // Verify signature (handle both order and payment link formats)
 const isPaymentLink = !!razorpay_payment_link_id;
-const isValidSignature = verifyRazorpaySignature(
-  orderId,
-  razorpay_payment_id,
-  razorpay_signature,
-  isPaymentLink,
-  referenceId
-);
-    if (!isValidSignature) {
-      console.log('❌ Invalid payment signature');
-      return {
-        statusCode: 400,
-        headers,
-        body: generateErrorPage('Payment verification failed. Invalid signature.')
-      };
-    }
+let isValidSignature = true;
 
+if (!isPaymentLink) {
+  // Only verify signature for regular orders, not payment links
+  isValidSignature = verifyRazorpaySignature(
+    orderId,
+    razorpay_payment_id,
+    razorpay_signature
+  );
+  
+  if (!isValidSignature) {
+    console.log('❌ Invalid payment signature');
+    return {
+      statusCode: 400,
+      headers,
+      body: generateErrorPage('Payment verification failed. Invalid signature.')
+    };
+  }
+} else {
+  console.log('ℹ️ Skipping signature verification for Payment Link (verified by Razorpay)');
+}
     // Fetch payment details from Razorpay
     const payment = await razorpay.payments.fetch(razorpay_payment_id);
     console.log('💳 Payment status:', payment.status);
@@ -273,34 +277,16 @@ async function handleTransferFailed(transfer) {
 }
 
 // Verify Razorpay payment signature (works for both orders and payment links)
-// Verify Razorpay payment signature (works for both orders and payment links)
-function verifyRazorpaySignature(orderId, paymentId, signature, isPaymentLink = false, referenceId = null) {
-  let text;
-  
-  if (isPaymentLink && referenceId !== null) {
-    // For Payment Links: payment_link_id + "|" + payment_link_status + "|" + payment_link_reference_id + "|" + payment_id
-    text = orderId + '|' + 'paid' + '|' + referenceId + '|' + paymentId;
-  } else if (isPaymentLink) {
-    // Fallback for Payment Links without reference ID
-    text = orderId + '|' + paymentId;
-  } else {
-    // For regular orders: order_id + "|" + payment_id
-    text = orderId + '|' + paymentId;
-  }
-  
-  console.log(`🔍 Signature verification text: ${text}`);
-  
+// Verify Razorpay payment signature (for regular orders only)
+function verifyRazorpaySignature(orderId, paymentId, signature) {
+  const text = orderId + '|' + paymentId;
   const expectedSignature = crypto
     .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
     .update(text)
     .digest('hex');
   
-  console.log(`🔍 Expected signature: ${expectedSignature}`);
-  console.log(`🔍 Received signature: ${signature}`);
-  
   return expectedSignature === signature;
 }
-
 // Verify webhook signature
 function verifyWebhookSignature(body, signature) {
   if (!process.env.RAZORPAY_WEBHOOK_SECRET) {
