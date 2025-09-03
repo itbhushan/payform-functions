@@ -1,4 +1,4 @@
-// netlify/functions/verify-razorpay-payment.js - UPGRADED FOR ROUTE
+// netlify/functions/verify-razorpay-payment.js - FIXED FOR PAYMENT LINKS
 const { createClient } = require('@supabase/supabase-js');
 const crypto = require('crypto');
 const Razorpay = require('razorpay');
@@ -29,7 +29,7 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    console.log('🔍 Razorpay Route payment verification started');
+    console.log('🔍 Razorpay payment verification started');
     console.log('Query parameters:', event.queryStringParameters);
 
     // Handle webhook verification (for automatic updates)
@@ -38,10 +38,22 @@ exports.handler = async (event, context) => {
     }
 
     // Handle redirect verification (for user-facing success page)
-    const { razorpay_payment_id, razorpay_order_id, razorpay_signature, form_id, email } = event.queryStringParameters || {};
+    const queryParams = event.queryStringParameters || {};
+    const { 
+      razorpay_payment_id, 
+      razorpay_order_id, 
+      razorpay_payment_link_id,
+      razorpay_payment_link_reference_id,
+      razorpay_signature 
+    } = queryParams;
 
-    if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
+    // Support both Order and Payment Link callbacks
+    const orderId = razorpay_order_id || razorpay_payment_link_id;
+    const referenceId = razorpay_payment_link_reference_id;
+
+    if (!razorpay_payment_id || !orderId || !razorpay_signature) {
       console.log('❌ Missing required payment parameters');
+      console.log('Available parameters:', Object.keys(queryParams));
       return {
         statusCode: 400,
         headers,
@@ -49,11 +61,11 @@ exports.handler = async (event, context) => {
       };
     }
 
-    console.log(`🔍 Verifying payment: ${razorpay_payment_id}`);
+    console.log(`🔍 Verifying payment: ${razorpay_payment_id} for order/link: ${orderId}`);
 
-    // Verify signature
+    // Verify signature (handle both order and payment link formats)
     const isValidSignature = verifyRazorpaySignature(
-      razorpay_order_id,
+      orderId,
       razorpay_payment_id,
       razorpay_signature
     );
@@ -80,7 +92,7 @@ exports.handler = async (event, context) => {
       };
     }
 
-    // Update transaction in database
+    // Update transaction in database (handle both order and payment link IDs)
     const { data: transaction, error: updateError } = await supabase
       .from('transactions')
       .update({
@@ -89,7 +101,7 @@ exports.handler = async (event, context) => {
         customer_name: payment.notes?.name || 'Customer',
         updated_at: new Date().toISOString()
       })
-      .eq('razorpay_order_id', razorpay_order_id)
+      .eq('razorpay_order_id', orderId)
       .select('*')
       .single();
 
@@ -102,14 +114,14 @@ exports.handler = async (event, context) => {
       };
     }
 
-    // Update commission status to completed
+    // Update commission status to completed (use orderId)
     await supabase
       .from('platform_commissions')
       .update({
         status: 'completed',
         processed_at: new Date().toISOString()
       })
-      .eq('transaction_id', razorpay_order_id);
+      .eq('transaction_id', orderId);
 
     console.log('✅ Payment verification completed successfully');
 
@@ -166,6 +178,10 @@ async function handleWebhook(event, headers) {
         await handleTransferFailed(payload.transfer.entity);
         break;
 
+      case 'payment_link.paid':
+        await handlePaymentLinkPaid(payload.payment_link.entity, payload.payment.entity);
+        break;
+
       default:
         console.log(`ℹ️ Unhandled webhook event: ${eventType}`);
     }
@@ -190,6 +206,9 @@ async function handleWebhook(event, headers) {
 async function handlePaymentCaptured(payment) {
   console.log(`💳 Payment captured: ${payment.id}`);
   
+  // Handle both order_id and payment link scenarios
+  const orderId = payment.order_id || payment.notes?.payment_link_id;
+  
   await supabase
     .from('transactions')
     .update({
@@ -197,9 +216,25 @@ async function handlePaymentCaptured(payment) {
       razorpay_payment_id: payment.id,
       updated_at: new Date().toISOString()
     })
-    .eq('razorpay_order_id', payment.order_id);
+    .eq('razorpay_order_id', orderId);
 
   console.log('✅ Transaction updated for captured payment');
+}
+
+// Handle payment link paid webhook
+async function handlePaymentLinkPaid(paymentLink, payment) {
+  console.log(`💳 Payment link paid: ${paymentLink.id}`);
+  
+  await supabase
+    .from('transactions')
+    .update({
+      payment_status: 'paid',
+      razorpay_payment_id: payment.id,
+      updated_at: new Date().toISOString()
+    })
+    .eq('razorpay_order_id', paymentLink.id);
+
+  console.log('✅ Transaction updated for payment link');
 }
 
 // Handle transfer processed webhook
@@ -234,7 +269,7 @@ async function handleTransferFailed(transfer) {
   console.log('⚠️ Commission marked as failed for transfer failure');
 }
 
-// Verify Razorpay payment signature
+// Verify Razorpay payment signature (works for both orders and payment links)
 function verifyRazorpaySignature(orderId, paymentId, signature) {
   const text = orderId + '|' + paymentId;
   const expectedSignature = crypto
@@ -247,6 +282,11 @@ function verifyRazorpaySignature(orderId, paymentId, signature) {
 
 // Verify webhook signature
 function verifyWebhookSignature(body, signature) {
+  if (!process.env.RAZORPAY_WEBHOOK_SECRET) {
+    console.log('⚠️ No webhook secret configured, skipping verification');
+    return true;
+  }
+
   const expectedSignature = crypto
     .createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET)
     .update(body)
@@ -303,24 +343,26 @@ function generateSuccessPage(payment, transaction) {
         <div class="container">
           <div class="success-icon">🎉</div>
           <h1 style="color: #4caf50; margin-bottom: 10px;">Payment Successful!</h1>
-          <p>Your payment has been processed and automatically split using Razorpay Route.</p>
+          <p>Thank you for your payment. Your transaction has been processed successfully.</p>
           
           <div class="amount">
             <p style="margin: 5px 0;"><strong>Product:</strong> ${transaction.product_name}</p>
             <p style="margin: 5px 0;"><strong>Payment ID:</strong> ${payment.id}</p>
             <p style="margin: 5px 0;"><strong>Amount:</strong> ₹${transaction.payment_amount}</p>
             <p style="margin: 5px 0;"><strong>Email:</strong> ${transaction.email}</p>
-            <p style="margin: 5px 0;"><strong>Status:</strong> ✅ Paid & Split</p>
+            <p style="margin: 5px 0;"><strong>Status:</strong> ✅ Paid & Confirmed</p>
           </div>
 
+          ${transaction.gateway_fee ? `
           <div class="splits">
             <p style="margin: 5px 0; font-size: 14px;"><strong>Payment Breakdown:</strong></p>
-            <p style="margin: 5px 0; font-size: 12px;">💳 Razorpay Fee: ₹${transaction.gateway_fee}</p>
-            <p style="margin: 5px 0; font-size: 12px;">🏢 Platform Fee: ₹${transaction.platform_commission}</p>
-            <p style="margin: 5px 0; font-size: 12px;">👤 Form Admin: ₹${transaction.net_amount_to_admin}</p>
+            <p style="margin: 5px 0; font-size: 12px;">💳 Gateway Fee: ₹${transaction.gateway_fee || '0'}</p>
+            <p style="margin: 5px 0; font-size: 12px;">🏢 Platform Fee: ₹${transaction.platform_commission || '0'}</p>
+            <p style="margin: 5px 0; font-size: 12px;">👤 Form Admin: ₹${transaction.net_amount_to_admin || transaction.payment_amount}</p>
           </div>
+          ` : ''}
 
-          <p>Form admin will receive their share automatically via Razorpay Route.</p>
+          <p>You will receive a confirmation email shortly.</p>
           <p style="color: #666; margin-top: 30px; font-size: 14px;">You can now close this window.</p>
         </div>
       </body>
