@@ -103,7 +103,7 @@ exports.handler = async (event, context) => {
         product_name,
         payment_amount: product_price,
         payment_currency: 'INR',
-        payment_status: 'created',
+        payment_status: 'pending',
         payment_provider: 'razorpay_link',
         transaction_id: paymentLink.id,
         razorpay_order_id: paymentLink.id,
