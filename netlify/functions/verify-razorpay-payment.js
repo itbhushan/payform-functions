@@ -121,6 +121,46 @@ if (!isPaymentLink) {
       };
     }
 
+    // Add this after the database update
+console.log('✅ Transaction updated successfully');
+
+// Send confirmation email
+try {
+  console.log('📧 Sending confirmation email...');
+  const confirmationEmailResponse = await fetch(`${process.env.SUPABASE_URL}/functions/v1/send-payment-email`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+    },
+    body: JSON.stringify({
+      to: transaction.email,
+      subject: `Payment Confirmed - ${transaction.product_name}`,
+      productName: transaction.product_name,
+      amount: transaction.payment_amount,
+      customerName: transaction.customer_name,
+      paymentId: razorpay_payment_id,
+      adminId: transaction.admin_id,
+      isConfirmation: true // This tells the email service to send confirmation instead of payment request
+    })
+  });
+
+  if (confirmationEmailResponse.ok) {
+    const emailResult = await confirmationEmailResponse.json();
+    console.log('📧 Confirmation email result:', emailResult);
+    
+    if (emailResult.success) {
+      console.log('✅ Confirmation email sent successfully');
+    } else {
+      console.error('⚠️ Confirmation email failed:', emailResult.error);
+    }
+  } else {
+    console.error('⚠️ Confirmation email request failed:', confirmationEmailResponse.status);
+  }
+} catch (emailError) {
+  console.error('⚠️ Confirmation email error (non-critical):', emailError.message);
+}
+    
     // Update commission status to completed (use orderId)
     await supabase
       .from('platform_commissions')
