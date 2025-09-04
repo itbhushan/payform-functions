@@ -105,7 +105,6 @@ if (!isPaymentLink) {
       .update({
         payment_status: 'paid',
         razorpay_payment_id: razorpay_payment_id,
-        customer_name: payment.notes?.name || 'Customer',
         updated_at: new Date().toISOString()
       })
       .eq('razorpay_order_id', orderId)
